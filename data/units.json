@@ -76,8 +76,8 @@
         "name": "Боевой клич",
         "desc": "Даёт +5 к урону за каждого союзного воина на 6 тиков",
         "type": "aura",
-        "cooldown": 3,
-        "effect": {"bonus_damage_per_ally": 5, "duration": 6}
+        "cooldown": 60,
+        "effect": {"bonus_damage_per_ally": 5, "duration": 50}
       }
     },
     "warrior_knight": {
@@ -101,8 +101,8 @@
         "name": "Щитовая стена",
         "desc": "Снижает входящий урон на 30% всем союзникам на 20 тиков",
         "type": "buff_allies",
-        "cooldown": 4,
-        "effect": {"damage_reduction_pct": 30, "duration": 20}
+        "cooldown": 60,
+        "effect": {"damage_reduction_pct": 30, "duration": 30}
       }
     },
     "mage_acolyte": {
@@ -145,7 +145,7 @@
         "name": "Огненный шар",
         "desc": "Наносит 80 урона всем врагам в радиусе 2",
         "type": "aoe_damage",
-        "cooldown": 3,
+        "cooldown": 60,
         "effect": {"damage": 80, "radius": 2}
       }
     },
@@ -170,7 +170,7 @@
         "name": "Метеор",
         "desc": "Наносит 150 урона всем врагам (огромный радиус)",
         "type": "aoe_damage",
-        "cooldown": 4,
+        "cooldown": 80,
         "effect": {"damage": 150, "radius": 3}
       }
     },
@@ -195,7 +195,7 @@
         "name": "Волна разрушения",
         "desc": "Наносит 200 урона всем врагам и замедляет их на 30% на 10 тиков",
         "type": "aoe_damage_slow",
-        "cooldown": 5,
+        "cooldown": 90,
         "effect": {
           "damage": 200,
           "radius": 3,
@@ -244,8 +244,8 @@
         "name": "Огненные стрелы",
         "desc": "Следующая атака наносит +50 урона и бьёт до 3 врагов с переднего края",
         "type": "buff_next_attack",
-        "cooldown": 3,
-        "effect": {"bonus_damage": 50, "radius": 2, "duration": 60}
+        "cooldown": 30,
+        "effect": {"bonus_damage": 50, "radius": 2, "duration": 25}
       }
     },
     "archer_marksman": {
@@ -269,7 +269,7 @@
         "name": "Выстрел смерти",
         "desc": "Наносит 100 урона самому слабому врагу (гарантированный крит)",
         "type": "single_target_critical",
-        "cooldown": 4,
+        "cooldown": 50,
         "effect": {"damage": 100}
       }
     },
@@ -294,7 +294,7 @@
         "name": "Дождь из стрел",
         "desc": "Наносит 180 урона всем врагам в радиусе 2, +20% скорости атаки на 20 тиков",
         "type": "aoe_damage_buff",
-        "cooldown": 5,
+        "cooldown": 40,
         "effect": {
           "damage": 180,
           "radius": 2,

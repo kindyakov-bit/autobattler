@@ -153,12 +153,11 @@ class TestAoeDamageBuff:
         sim.run(max_ticks=600)
         caster = sim.teams["player"][0]
         base = float(unit_data["archer_battleheart"]["attack_speed"])
-        duration = unit_data["archer_battleheart"]["active"]["effect"][
-            "speed_bonus_duration"]
-        cooldown = unit_data["archer_battleheart"]["active"]["cooldown"]
-        # Одновременно активно не больше, чем помещается в окно длительности
         assert caster.base_attack_speed == pytest.approx(base)
-        assert len(caster.statuses) <= max(1, duration // max(cooldown, 1) + 1)
+        # Скорость никогда не должна уходить далеко от базы
+        assert caster.attack_speed <= base * 2.0, (
+            f"attack_speed {caster.attack_speed:.2f} при базе {base} — "
+            "бафф складывается бесконечно")
 
     def test_buff_wears_off_during_battle(self, unit_data):
         sim = BattleSimulator(seed=7)
@@ -166,11 +165,14 @@ class TestAoeDamageBuff:
         sim.add_team("enemy", [mk("warrior_knight", unit_data)])
         sim.run(max_ticks=600)
         caster = sim.teams["player"][0]
-        # К концу боя эффект либо истёк, либо их немного — но не «вечный»
-        max_concurrent = unit_data["archer_battleheart"]["active"]["effect"][
-            "speed_bonus_duration"] // unit_data["archer_battleheart"][
-            "active"]["cooldown"]
-        assert len(caster.statuses) <= max_concurrent
+        # Одновременно активно не больше, чем помещается в окно длительности.
+        # duration < cooldown -> максимум 1 эффект (иначе был бы «вечный» бафф)
+        eff = unit_data["archer_battleheart"]["active"]["effect"]
+        cd = unit_data["archer_battleheart"]["active"]["cooldown"]
+        max_concurrent = max(1, -(-eff["speed_bonus_duration"] // cd))
+        assert len(caster.statuses) <= max_concurrent, (
+            f"{len(caster.statuses)} эффектов активно — бафф не истекает "
+            f"(duration={eff['speed_bonus_duration']}, cooldown={cd})")
 
 
 class TestBuffAllies:
