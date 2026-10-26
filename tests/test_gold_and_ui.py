@@ -115,12 +115,9 @@ def _unit_cost(key):
 class TestSynergyApplication:
     def test_apply_synergy_bonuses_no_keyerror(self, unit_data):
         """Раньше применялось только к first-key синергии и падало KeyError."""
-        from game.core.synergies import (calculate_synergy_bonuses,
-                                         apply_synergy_bonuses)
+        from game.core.synergies import apply_synergy_bonuses
         team = [mk(u["name"], u["hp"], u["damage"], u["attack_speed"],
                    u["range"], u["class"]) for u in unit_data.values()]
-        bonuses = calculate_synergy_bonuses(team, {"warrior": {
-            "thresholds": [2], "bonuses": {"2": {"hp_bonus_pct": 15}}}})
         # не должно быть исключения даже при «неправильном» наборе синергий
         out = apply_synergy_bonuses(team, {"warrior": {"hp_bonus_pct": 15}})
         assert out[0]["hp"] > team[0]["hp"] or True  # лишь бы не упало
@@ -232,7 +229,14 @@ class TestFullMatchSmoke:
 
         def fake_get():
             calls["n"] += 1
-            if calls["n"] > 2:      # «нажимаем» Enter — выход из драфта
+            # Несколько первых вызовов «покупаем» юнита, ставим на доску —
+            # иначе smoke-тест идёт с пустой доской и не проверяет отрисовку
+            # непустого бенча/борда (именно на этом падала игра).
+            if calls["n"] == 1:
+                return [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_w)]
+            if calls["n"] == 2:
+                return [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_d)]
+            if calls["n"] > 3:
                 return [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN)]
             return []
 

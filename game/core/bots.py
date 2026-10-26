@@ -1,21 +1,18 @@
 """Bots AI: simple strategies for PvP rounds.
 
 Difficulty levels:
-  - EASY: buys cheapest units, random placement
-  - MEDIUM: builds synergies (2+ of one class), balanced composition
-  - HARD: optimizes composition by power-to-cost ratio
+   - EASY: buys cheapest units, random placement
+   - MEDIUM: builds synergies (2+ of one class), balanced composition
+   - HARD: optimizes composition by power-to-cost ratio
+
+ВАЖНО: decide_draft() возвращает юнитов с полем ``name`` = КЛЮЧ из
+data/units.json (например "warrior_freshman"), а не отображаемое имя
+("Новобранец"). Магазин и пул работают с ключами — если вернуть
+отображаемое имя, Shop.buy упадёт с «копий в пуле не осталось» и бот
+останется с пустой доской.
 """
 
 import random
-
-
-class BotConfig:
-    """Bot configuration."""
-
-    def __init__(self, name: str, difficulty: str = "MEDIUM"):
-        self.name = name
-        self.difficulty = difficulty  # EASY / MEDIUM / HARD
-        self.rng = random.Random()
 
 
 class SimpleBot:
@@ -30,7 +27,12 @@ class SimpleBot:
 
     def decide_draft(self, available_units: dict, gold: int,
                      current_team: list[dict], synergy_data: dict) -> list[dict]:
-        """Make draft decisions."""
+        """Make draft decisions.
+
+        Returns:
+            Список юнитов с ``name`` = ключ JSON, ``cost``, ``display_name``,
+            ``class``. Вызывающий код кормит их Shop/DraftPhase.
+        """
         if self.difficulty == "EASY":
             return self._easy_draft(available_units, gold)
         elif self.difficulty == "MEDIUM":
@@ -38,68 +40,76 @@ class SimpleBot:
         else:  # HARD
             return self._hard_draft(available_units, gold, current_team, synergy_data)
 
-    def _easy_draft(self, available_units: dict, gold: int) -> list[dict]:
-        """EASY: buys cheapest units within budget."""
+    # ── общая механика покупки ─────────────────────────────────────────────
+
+    @staticmethod
+    def _as_purchasable(key: str, unit: dict) -> dict:
+        """Превратить определение юнита в «покупаемый» элемент для магазина."""
+        return {
+            "name": key,                       # ключ JSON — им оперирует Shop
+            "cost": unit.get("cost", 1),
+            "display_name": unit.get("name", key),
+            "class": unit.get("class", ""),
+        }
+
+    def _buy_loop(self, sorted_units, gold: int) -> list[dict]:
+        """Покупаем по очереди, пока хватает золота и слотов (до 6)."""
         purchases = []
         remaining_gold = gold
-        sorted_units = sorted(available_units.values(), key=lambda u: u.get("cost", 1))
-        for unit in sorted_units:
+        for key, unit in sorted_units:
             cost = unit.get("cost", 1)
             if remaining_gold >= cost and len(purchases) < 6:
-                purchases.append(dict(unit))
+                purchases.append(self._as_purchasable(key, unit))
                 remaining_gold -= cost
         return purchases
+
+    # ── стратегии ──────────────────────────────────────────────────────────
+
+    def _easy_draft(self, available_units: dict, gold: int) -> list[dict]:
+        """EASY: buys cheapest units within budget."""
+        units = sorted(available_units.items(), key=lambda kv: kv[1].get("cost", 1))
+        return self._buy_loop(units, gold)
 
     def _medium_draft(self, available_units: dict, gold: int,
                       current_team: list[dict], synergy_data: dict) -> list[dict]:
         """MEDIUM: tries to build a 2+ class synergy."""
-        purchases = []
-        remaining_gold = gold
         class_counts = {}
         for u in current_team:
             cls = u.get("class")
             if cls:
                 class_counts[cls] = class_counts.get(cls, 0) + 1
+
+        # Ищем синергию, где не хватает ровно одного юнита до порога
         target_class = None
-        for syn_name in synergy_data:
+        for syn_name, syn_info in synergy_data.items():
             count = class_counts.get(syn_name, 0)
-            thresholds = synergy_data[syn_name].get("thresholds", [])
-            if count >= 1 and len(thresholds) > 0 and count < thresholds[0]:
+            thresholds = syn_info.get("thresholds", [])
+            if count >= 1 and thresholds and count < max(thresholds):
                 target_class = syn_name
                 break
-        same_class_units = [u for u in available_units.values()
-                           if u.get("class") == target_class]
-        other_units = [u for u in available_units.values()
-                       if u.get("class") != target_class]
-        all_sorted = same_class_units + other_units
-        all_sorted.sort(key=lambda u: u.get("cost", 1))
-        for unit in all_sorted:
-            cost = unit.get("cost", 1)
-            if remaining_gold >= cost and len(purchases) < 6:
-                purchases.append(dict(unit))
-                remaining_gold -= cost
-        return purchases
+
+        same = [(k, u) for k, u in available_units.items()
+                if u.get("class") == target_class]
+        other = [(k, u) for k, u in available_units.items()
+                 if u.get("class") != target_class]
+        # Дешёвые первыми внутри своей группы
+        same.sort(key=lambda kv: kv[1].get("cost", 1))
+        other.sort(key=lambda kv: kv[1].get("cost", 1))
+        return self._buy_loop(same + other, gold)
 
     def _hard_draft(self, available_units: dict, gold: int,
                     current_team: list[dict], synergy_data: dict) -> list[dict]:
         """HARD: optimizes composition by power-to-cost ratio."""
-        purchases = []
-        remaining_gold = gold
 
-        def unit_power(u):
+        def unit_power(kv):
+            u = kv[1]
             hp = u.get("hp", 100)
             dmg = u.get("damage", 10)
             cost = max(1, u.get("cost", 1))
             return (dmg * 2 + hp / 10) / cost
 
-        sorted_units = sorted(available_units.values(),
-                              key=unit_power, reverse=True)
-        for unit in sorted_units:
-            cost = unit.get("cost", 1)
-            if remaining_gold >= cost and len(purchases) < 6:
-                purchases.append(dict(unit))
-                remaining_gold -= cost
-        return purchases
+        units = sorted(available_units.items(), key=unit_power, reverse=True)
+        return self._buy_loop(units, gold)
 
     def get_team(self) -> list[dict]:
         """Get current team composition."""

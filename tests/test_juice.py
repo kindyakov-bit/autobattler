@@ -189,6 +189,95 @@ class TestReadability:
         out = ui.fit_text("Новобранец", BENCH_W - 8, ui.font_micro)
         assert ui.font_micro.size(out)[0] <= BENCH_W - 8
 
+    def test_draft_with_units_on_board_renders(self, ui):
+        """Непустая доска + выбранный слот шопа не должны ронять отрисовку.
+
+        Ровно на этом падала игра: border_color брал display_name ДО его
+        присваивания в секции доски (UnboundLocalError).
+        """
+        class P:
+            gold = 10
+            reserve = ["warrior_freshman", "archer_marksman★2"]
+            board = [{"name": "warrior_freshman", "star": 1},
+                     {"name": "archer_marksman", "star": 2},
+                     {"name": "mage_sage", "star": 1}]
+            items = []
+            def get_synergy_count(self, c):
+                return 1
+
+        ui.selected_shop_idx = 0      # ключевая деталь: слот шопа выбран
+        ui.selected_bench_idx = None
+        ui._draw_interactive_draft(
+            P(), [{"name": "warrior_freshman", "cost": 1}], gold=10,
+            round_num=4, is_creep=False,
+            synergy_data={"warrior": {"thresholds": [2], "bonuses": {}}})
+        # не упали = тест пройден
+
+    def test_draft_with_selected_bench_renders(self, ui):
+        """И с выбранным слотом бенча тоже."""
+        class P:
+            gold = 10
+            reserve = ["warrior_freshman"]
+            board = [{"name": "warrior_freshman", "star": 1}]
+            items = []
+            def get_synergy_count(self, c):
+                return 1
+
+        ui.selected_shop_idx = None
+        ui.selected_bench_idx = 0
+        ui._draw_interactive_draft(
+            P(), [{"name": "warrior_freshman", "cost": 1}], gold=10,
+            round_num=4, is_creep=False, synergy_data={})
+
+
+class TestLegacyRunPath:
+    """run() — старый путь (main(), python ui/game_ui.py).
+
+    На нём была опечатка: last_processed_tick использовался, но не был
+    объявлен -> NameError на первом кадре боя. Pyflakes это поймал.
+    """
+
+    def test_run_has_no_undefined_names(self):
+        import pyflakes.api
+        import pyflakes.reporter
+        import io
+        path = _project_root / "ui" / "game_ui.py"
+        out, err = io.StringIO(), io.StringIO()
+        reporter = pyflakes.reporter.Reporter(out, err)
+        pyflakes.api.checkPath(str(path), reporter)
+        text = out.getvalue()
+        assert "undefined name" not in text, (
+            f"в game_ui.py есть неопределённые имена:\n{text}")
+
+    def test_all_source_files_clean(self):
+        """Ни в одном модуле проекта нет undefined name."""
+        import pyflakes.api
+        import pyflakes.reporter
+        import io
+        files = [
+            _project_root / "ui" / "game_ui.py",
+            _project_root / "game" / "battle" / "engine.py",
+            _project_root / "game" / "core" / "round.py",
+            _project_root / "game" / "core" / "shop.py",
+            _project_root / "game" / "core" / "economy.py",
+            _project_root / "game" / "core" / "synergies.py",
+            _project_root / "game" / "core" / "draft.py",
+            _project_root / "game" / "core" / "player.py",
+            _project_root / "game" / "core" / "bots.py",
+            _project_root / "game" / "audio.py",
+            _project_root / "run_ui.py",
+            _project_root / "run_battle.py",
+        ]
+        bad = []
+        for f in files:
+            out, err = io.StringIO(), io.StringIO()
+            pyflakes.api.checkPath(str(f),
+                                   pyflakes.reporter.Reporter(out, err))
+            for line in out.getvalue().splitlines():
+                if "undefined name" in line:
+                    bad.append(line)
+        assert not bad, "неопределённые имена:\n" + "\n".join(bad)
+
 
 class TestJuiceWiring:
     def test_sound_played_on_hit(self, monkeypatch):
@@ -226,7 +315,6 @@ class TestJuiceWiring:
             f"ожидали звуки боя, получили: {set(played)}")
 
     def test_shake_triggered_on_crit(self):
-        monkeypatch_env = {}
         import os
         os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
         os.environ.setdefault("SDL_AUDIODRIVER", "dummy")

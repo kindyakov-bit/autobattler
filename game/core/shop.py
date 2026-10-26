@@ -1,8 +1,6 @@
 """Магазин: покупка юнитов/предметов, слияние ★1→★2→★3, продажа."""
 
-import json
 import random
-from pathlib import Path
 
 
 class ShopError(Exception):
@@ -204,8 +202,7 @@ class Shop:
         """
         if unit_idx < 0 or unit_idx >= len(player.board):
             raise ShopError(f"Индекс юнита {unit_idx} вне диапазона")
-        
-        unit = player.board[unit_idx]
+
         # Предметы хранятся в стат_словах юнита, а не как отдельный объект
         # Для простоты: снимаем все бонусы (восстанавливаем базовые)
         # В полной версии здесь было бы хранение original_stats

@@ -20,7 +20,7 @@ _SCRIPT_DIR = Path(__file__).parent.parent.parent.resolve()
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-from game.core.economy import round_economy, calculate_interest
+from game.core.economy import round_economy
 from game.core.synergies import calculate_synergy_bonuses, apply_synergy_bonuses
 from game.battle.engine import BattleSimulator
 from game.core.shop import Shop
@@ -135,7 +135,6 @@ class Game:
         for state in self.history:
             winner = state.battle_result["winner"] if state.battle_result else "?"
             reason = state.battle_result.get("reason", "") if state.battle_result else ""
-            hp = state.battle_result.get("team_hp", {}) if state.battle_result else {}
 
             lines.append(
                 f"\nРаунд {state.round_number} "
@@ -165,7 +164,6 @@ def _bot_draft_with_shop(bot, draft_phase: DraftPhase, unit_data: dict, gold: in
     Returns:
         Список юнитов в формате для боя (с star-уровнем).
     """
-    from game.core.bots import create_bot
     
     # Бот решает, что купить
     draft_decision = bot.decide_draft(

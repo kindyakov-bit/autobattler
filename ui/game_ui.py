@@ -63,7 +63,6 @@ class DamageNumber:
         return self.life > 0
 
     def draw(self, screen, font):
-        alpha = min(1.0, self.life / self.max_life) * 255
         surf = font.render(f"-{self.amount}", True, self.color)
         # Draw with slight shadow for readability
         sx, sy = int(self.x), int(self.y)
@@ -720,6 +719,13 @@ class GameUI:
             x = BOARD_X0 + self.width // 3 + (i % BOARD_COLS) * (
                 (self.width // 3 - 40) // BOARD_COLS)
             y = BOARD_Y0 + (i // BOARD_COLS) * BOARD_ROW_H
+
+            # Переводим английский ключ на русское имя (до использования!)
+            unit_name = unit.get("name", "?")
+            base = unit_name.split("★")[0]
+            ru_name = self.all_units.get(base, {}).get("name", base)
+            display_name = ru_name + self.star_suffix(unit_name)
+
             # Подсветка board slot (при наведении)
             if self.selected_bench_idx is None and self.selected_shop_idx is None:
                 border_color = (255, 255, 100)
@@ -728,11 +734,6 @@ class GameUI:
             border_width = 2
             pygame.draw.rect(self.screen, slot_color, (x, y, BOARD_W, BOARD_H), border_radius=4)
             pygame.draw.rect(self.screen, border_color, (x, y, BOARD_W, BOARD_H), width=border_width, border_radius=4)
-            # Переводим английский ключ на русское имя
-            unit_name = unit.get("name", "?")
-            base = unit_name.split("★")[0]
-            ru_name = self.all_units.get(base, {}).get("name", base)
-            display_name = ru_name + self.star_suffix(unit_name)
             name_surf = self.font_micro.render(
                 self.fit_text(display_name, BOARD_W - 8, self.font_micro),
                 True, (255, 255, 255))
@@ -1345,8 +1346,6 @@ class GameUI:
         self.init()
         self.running = True
 
-        PLAYER_COLOR = (40, 80, 160)
-        ENEMY_COLOR = (160, 50, 50)
         BG_COLOR = (20, 20, 30)
 
         history = game_instance.history
@@ -1360,6 +1359,9 @@ class GameUI:
         current_round_idx = 0
         tick_count = 0
         paused = False
+        # Последний обработанный тик для генератора эффектов.
+        # Без этого run() падал с NameError на первом же кадре боя.
+        last_processed_tick = -1
 
         while self.running:
             for event in pygame.event.get():
@@ -1522,6 +1524,7 @@ class GameUI:
                 completed = current_round_idx if tick_count > 0 else -1
                 self.draw_round_progress(completed, len(history))
 
+                last_processed_tick = tick_count
                 tick_count += self.ticks_per_frame
 
                 # Check if round is over (show final frame before ending)
@@ -1620,13 +1623,13 @@ class GameUI:
         Keys during draft: W=Buy(1g) S=Sell-last D=Place F=Remove R=Roll N=Next Enter=Done
         During battle: SPACE=Pause +/-=Speed ESC=Quit
         """
-        from game.core.round import Game, load_game_data
+        from game.core.round import load_game_data
         from game.core.shop import Shop
         from game.core.pool import Pool
         from game.core.draft import DraftPhase
         from game.core.player import Player
         from game.core.bots import create_bot
-        from game.core.economy import round_economy, calculate_interest, START_HP
+        from game.core.economy import round_economy, START_HP
         from game.core.synergies import (
             calculate_synergy_bonuses, apply_synergy_bonuses,
             calculate_passive_bonuses, apply_passive_bonuses,
@@ -1645,9 +1648,7 @@ class GameUI:
         unit_costs = {name: info["cost"] for name, info in all_units.items()}
         
         BG_COLOR = (20, 20, 30)
-        PLAYER_COLOR = (40, 80, 160)
-        ENEMY_COLOR = (160, 50, 50)
-        
+
         gold = 10
         hp = START_HP
         history = []  # list of round result dicts
@@ -1921,7 +1922,6 @@ class GameUI:
             
             # Header
             is_creep = state["is_creep"]
-            status = "CREEP" if is_creep else "PvP"
             self.draw_header(state["round_number"], state["total_gold_after"],
                          is_creep, hp=state.get("hp"))
             

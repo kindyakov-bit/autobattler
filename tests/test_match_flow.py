@@ -4,6 +4,7 @@
 а проиграть матч было невозможно — не было здоровья.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -135,3 +136,78 @@ class TestEconomyUnchanged:
         assert calculate_interest(10) == 1
         assert calculate_interest(50) == 5
         assert calculate_interest(999) == 5
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Бот должен быть настоящим противником
+# ─────────────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def game_env():
+    import random
+    from game.core.shop import Shop
+    from game.core.pool import Pool
+    from game.core.draft import DraftPhase
+    from game.core.player import Player
+    unit_data = json.loads(
+        (_project_root / "data" / "units.json").read_text(encoding="utf-8"))["units"]
+    unit_costs = {n: i["cost"] for n, i in unit_data.items()}
+    shop = Shop(Pool(unit_costs), unit_costs=unit_costs,
+                rng=random.Random(1))
+    return shop, DraftPhase(shop, unit_data), Player(gold=20), unit_data
+
+
+class TestBotIsARealOpponent:
+    """Бот возвращал отображаемые имена вместо ключей JSON, поэтому Shop.buy
+    всегда падал с «копий в пуле не осталось» — доска бота была пустой,
+    и враг состоял из 2 захардкоженных юнитов. Игрок выигрывал все раунды."""
+
+    @pytest.mark.parametrize("preset", ["casual", "balanced", "aggressive"])
+    def test_bot_actually_buys_units(self, game_env, preset):
+        shop, dp, bot_player, unit_data = game_env
+        from game.core.bots import create_bot
+        bot = create_bot(preset=preset, seed=42)
+        decision = bot.decide_draft(unit_data, gold=20,
+                                    current_team=[], synergy_data={})
+        bought = []
+        for info in decision:
+            if bot_player.gold >= info.get("cost", 1):
+                try:
+                    bought.append(dp.buy_unit(bot_player, info["name"]))
+                except Exception as e:
+                    pytest.fail(f"бот не смог купить {info['name']}: {e}")
+        assert len(bought) >= 3, (
+            f"бот {preset} купил только {len(bought)} юнитов — доска пустая")
+
+    def test_bot_returns_json_keys_not_display_names(self, game_env):
+        """name в решении бота должен быть ключом JSON, а не 'Новобранец'."""
+        shop, dp, bot_player, unit_data = game_env
+        from game.core.bots import create_bot
+        bot = create_bot(preset="balanced", seed=1)
+        for info in bot.decide_draft(unit_data, gold=20, current_team=[],
+                                     synergy_data={}):
+            assert info["name"] in unit_data, (
+                f"'{info['name']}' — не ключ JSON; Shop так не умеет")
+
+    def test_bot_fills_board_against_gold(self, game_env):
+        """С 20 золота бот должен занять почти все 6 слотов."""
+        shop, dp, bot_player, unit_data = game_env
+        from game.core.bots import create_bot
+        bot = create_bot(preset="balanced", seed=7)
+        decision = bot.decide_draft(unit_data, gold=20, current_team=[],
+                                    synergy_data={})
+        assert len(decision) == 6, f"бот выбрал только {len(decision)} юнитов"
+
+    def test_bot_needs_synergy_data(self, game_env):
+        """MEDIUM-бот получает synergy_data и старается добирать порог."""
+        shop, dp, bot_player, unit_data = game_env
+        from game.core.bots import create_bot
+        synergy = {"warrior": {"thresholds": [2], "bonuses": {}}}
+        bot = create_bot(preset="balanced", seed=3)
+        with_warrior = bot.decide_draft(
+            unit_data, gold=20, current_team=[{"class": "warrior"}],
+            synergy_data=synergy)
+        # Ищем, что среди покупок есть воин (добор до порога 2)
+        classes = [i.get("class") for i in with_warrior]
+        assert "warrior" in classes, (
+            "MEDIUM-бот не пытается добирать синергию warrior")
