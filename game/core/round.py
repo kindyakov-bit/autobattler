@@ -184,10 +184,30 @@ def creep_wave_for(round_num: int) -> list[str]:
     return wave
 
 
-def build_creep_units(round_num: int, all_units: dict) -> list[dict]:
-    """Собрать врагов крип-раунда в формате для боя."""
+def build_creep_units(round_num: int, all_units: dict,
+                      player_units: list[dict] | None = None) -> list[dict]:
+    """Собрать врагов крип-раунда в формате для боя.
+
+    Качество волны растёт с номером раунда (CREEP_WAVES), а КОЛИЧЕСТВО
+    подстраивается под размер доски игрока: крипы — разминка, а не стена.
+    Слабый старт (2 юнита) не должен упираться в 4 крипов 3-го раунда,
+    иначе раунд выглядит тупиком. player_units=None → прежнее поведение.
+    """
+    wave = creep_wave_for(round_num)
+    if player_units is not None:
+        target = max(1, min(len(player_units), 6))
+        if len(wave) > target:
+            wave = wave[:target]
+        elif len(wave) < target:
+            # добираем циклично юнитами той же волны — качество
+            # остаётся уровнем раунда, растёт только количество
+            base = list(wave)
+            i = 0
+            while len(wave) < target:
+                wave.append(base[i % len(base)])
+                i += 1
     units = []
-    for key in creep_wave_for(round_num):
+    for key in wave:
         ud = all_units.get(key)
         if not ud:
             continue

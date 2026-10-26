@@ -1686,8 +1686,9 @@ class GameUI:
             stored_player_units = player_units
 
             if is_creep:
-                # Крипы: волна растёт с номером раунда (раньше была одинаковой)
-                enemy_units = build_creep_units(round_num, all_units)
+                # Крипы: волна растёт с номером раунда (раньше была одинаковой),
+                # количество подстраивается под размер доски игрока
+                enemy_units = build_creep_units(round_num, all_units, player_units)
             else:
                 # Bot drafts enemy units via shop — bot has its own economy (independent from player)
                 bot_gold = 20  # bot economy — enough for a full board
@@ -1747,6 +1748,15 @@ class GameUI:
                         {"name": "warrior_freshman", "hp": 500, "damage": 40, "attack_speed": 1.2, "range_": 1, "class": "warrior"},
                         {"name": "mage_acolyte", "hp": 300, "damage": 65, "attack_speed": 1.0, "range_": 4, "class": "mage"},
                     ]
+
+                # Синергии и пассивки бота — симметрично игроку. Раньше
+                # бонусы получали только player_units: бот строил синергию,
+                # но воевал на сырых статах (доска есть, эффекта нет).
+                enemy_units = apply_synergy_bonuses(
+                    enemy_units, calculate_synergy_bonuses(enemy_units, data["synergies"]))
+                if self.all_units:
+                    passive = calculate_passive_bonuses(enemy_units, self.all_units)
+                    enemy_units = apply_passive_bonuses(enemy_units, passive)
             
             # Бонусы синергий/пассивок — иначе в шапке написано "warrior: 2",
             # а бой идёт на сырых статах из JSON
