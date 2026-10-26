@@ -26,7 +26,7 @@
     - aoe_damage_buff       — урон по области + бафф своей скорости атаки
     - buff_allies           — снижение входящего урона союзникам
     - buff_next_attack      — следующая атака бьёт по области с бонусом урона
-    - aura                  - бафф собственного урона за союзников своего класса
+    - aura                  — бафф собственного урона за союзников своего класса
 
 Все эффекты «на N тиков» живут в Unit.statuses и корректно истекают.
 
@@ -184,8 +184,7 @@ class Unit:
         self.statuses = []
         self.closing = 0
         self.attack_timer = self._ticks_per_attack()
-        self.ability_cooldown = (self.active_ability or {}).get("cooldown", 0) \
-            if self.active_ability else 0
+        self.ability_cooldown = (self.active_ability or {}).get("cooldown", 0)
         self._refresh_stats()
 
     # ── Урон ───────────────────────────────────────────────────────────────

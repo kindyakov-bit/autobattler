@@ -5,12 +5,17 @@
 
 Пассивные способности работают поверх синергий:
   - synergy_buff: бонус за каждого союзного юнита своего класса
-  - aura: пассивная аура урона/защиты
-  - buff_allies: бафф союзников
+
+Активные способности (aura, buff_allies, buff_next_attack, ...) живут в
+game/battle/engine.py — здесь только пассивки.
 
 Пример: Воин 2/4
   - 2+ воина: +15% HP ко всем воинам
   - 4+ воинов: +30% HP ко всем воинам (перекрывает предыдущий)
+
+Бонусы синергий и пассивок применяются через apply_synergy_bonuses() /
+apply_passive_bonuses() и всегда считаются от ``_base_*`` значений, поэтому
+их можно вызывать в любом порядке без повторного компаундирования.
 """
 
 
@@ -113,38 +118,47 @@ def calculate_passive_bonuses(team_units: list[dict], unit_data: dict) -> dict:
     return result
 
 
-def apply_synergy_hp_bonuses(team_units: list[dict], synergy_bonuses: dict) -> list[dict]:
-    """Применить HP-бонусы синергий к юнитам команды.
+def apply_synergy_bonuses(team_units: list[dict], synergy_bonuses: dict) -> list[dict]:
+    """Применить бонусы синергий к юнитам команды (оригинал не меняется).
 
-    Возвращает список словарей с изменённым max_hp (оригинал не меняется).
+    Поддерживает все бонусы, которые описал calculate_synergy_bonuses():
+    hp_bonus_pct, damage_bonus_pct, attack_speed_pct. Бонус всегда считается
+    от ``_base_*`` (исходного значения), поэтому синергии и пассивки можно
+    применять в любом порядке — они не будут складываться повторно.
 
     Args:
-        team_units: исходные данные юнитов
+        team_units: исходные данные юнитов (у каждого есть 'class')
         synergy_bonuses: результат calculate_synergy_bonuses()
 
     Returns:
-        Список юнитов с применёнными бонусами HP.
+        Список юнитов с применёнными бонусами.
     """
-    # Собираем все HP-бонусы для каждого класса
-    hp_bonus_pct = 0
-    for syn_name, bonuses in synergy_bonuses.items():
-        if "hp_bonus_pct" in bonuses:
-            # Находим класс синергии (по имени)
-            for unit in team_units:
-                if unit.get("class") == syn_name:
-                    hp_bonus_pct += bonuses["hp_bonus_pct"]
-                    break
-
     modified = []
     for unit in team_units:
-        u = dict(unit)  # копия
-        if "hp_bonus_pct" in synergy_bonuses and u.get("class") == list(synergy_bonuses.keys())[0]:
-            bonus = synergy_bonuses["hp_bonus_pct"]
-            original_hp = unit.get("_base_hp", unit.get("hp", 100))
-            u["hp"] = int(original_hp * (1 + bonus / 100))
+        u = dict(unit)
+        bonuses = synergy_bonuses.get(u.get("class"), {})
+
+        # Запоминаем базу, чтобы повторное применение не компаундировалось
+        u.setdefault("_base_hp", u.get("hp", 100))
+        u.setdefault("_base_damage", u.get("damage", 50))
+        u.setdefault("_base_attack_speed", u.get("attack_speed", 1.0))
+
+        if "hp_bonus_pct" in bonuses:
+            u["hp"] = int(u["_base_hp"] * (1 + bonuses["hp_bonus_pct"] / 100))
+        if "damage_bonus_pct" in bonuses:
+            u["damage"] = u["_base_damage"] * (1 + bonuses["damage_bonus_pct"] / 100)
+        if "attack_speed_pct" in bonuses:
+            u["attack_speed"] = u["_base_attack_speed"] * (
+                1 + bonuses["attack_speed_pct"] / 100)
+
         modified.append(u)
 
     return modified
+
+
+def apply_synergy_hp_bonuses(team_units: list[dict], synergy_bonuses: dict) -> list[dict]:
+    """Обратная совместимость: только HP-бонусы. См. apply_synergy_bonuses()."""
+    return apply_synergy_bonuses(team_units, synergy_bonuses)
 
 
 def apply_passive_bonuses(team_units: list[dict], passive_bonuses: dict) -> list[dict]:
@@ -161,16 +175,23 @@ def apply_passive_bonuses(team_units: list[dict], passive_bonuses: dict) -> list
     for unit in team_units:
         u = dict(unit)
         name_base = u.get("name", "").split("★")[0]
-        
+
+        # Запоминаем базу, чтобы бонус не компаундировался при повторном
+        # применении (и чтобы синергии + пассивки складывались предсказуемо)
+        u.setdefault("_base_hp", u.get("hp", 100))
+        u.setdefault("_base_damage", u.get("damage", 50))
+        u.setdefault("_base_attack_speed", u.get("attack_speed", 1.0))
+
         if name_base in passive_bonuses:
             bonus_info = passive_bonuses[name_base]
             # Добавляем пассивный бонус к соответствующему полю
             if "hp_bonus_pct" in bonus_info["bonus_key"]:
-                u["hp"] = int(u.get("hp", 100) * (1 + bonus_info["bonus_value"] / 100))
+                u["hp"] = int(u["_base_hp"] * (1 + bonus_info["bonus_value"] / 100))
             elif "damage_bonus_pct" in bonus_info["bonus_key"]:
-                u["damage"] = u.get("damage", 50) * (1 + bonus_info["bonus_value"] / 100)
+                u["damage"] = u["_base_damage"] * (1 + bonus_info["bonus_value"] / 100)
             elif "speed_bonus_pct" in bonus_info["bonus_key"]:
-                u["attack_speed"] = u.get("attack_speed", 1.0) * (1 + bonus_info["bonus_value"] / 100)
+                u["attack_speed"] = u["_base_attack_speed"] * (
+                    1 + bonus_info["bonus_value"] / 100)
         
         # Сохраняем информацию о пассивке для UI
         if name_base in passive_bonuses:

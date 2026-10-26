@@ -21,7 +21,7 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from game.core.economy import round_economy, calculate_interest
-from game.core.synergies import calculate_synergy_bonuses
+from game.core.synergies import calculate_synergy_bonuses, apply_synergy_bonuses
 from game.battle.engine import BattleSimulator
 from game.core.shop import Shop
 from game.core.pool import Pool
@@ -73,27 +73,30 @@ class Game:
 
         state = RoundState(self.round_number, is_creep)
 
-        # Фаза 1: расчёт синергий игрока (бонусы применяются к HP юнитов)
+        # Фаза 1: расчёт синергий игрока (бонусы применяются к статам юнитов)
         state.synergy_bonuses = calculate_synergy_bonuses(player_units, synergy_data)
+        player_units = apply_synergy_bonuses(player_units, state.synergy_bonuses)
 
         # Фаза 1.5: применяем пассивные способности (если есть unit_data)
-        if hasattr(self, 'unit_data') and self.unit_data:
+        if self.unit_data:
             from game.core.synergies import calculate_passive_bonuses, apply_passive_bonuses
             passive_bonuses = calculate_passive_bonuses(player_units, self.unit_data)
             player_units = apply_passive_bonuses(player_units, passive_bonuses)
 
         # Фаза 2: бой
         sim = BattleSimulator(seed=self.seed + self.round_number)
-        
-        # Передаём active способности в юниты для симулятора
-        if hasattr(self, 'unit_data') and self.unit_data:
+
+        # Передаём активные способности и криты из JSON в юниты для симулятора
+        if self.unit_data:
             for u in player_units:
                 name_base = u.get("name", "").split("★")[0]
                 if name_base in self.unit_data:
-                    active = self.unit_data[name_base].get("active")
-                    if active:
-                        u["active"] = dict(active)
-        
+                    ud = self.unit_data[name_base]
+                    if ud.get("active"):
+                        u["active"] = dict(ud["active"])
+                    u.setdefault("crit_chance", ud.get("crit_chance", 0))
+                    u.setdefault("unit_class", ud.get("class", ""))
+
         sim.add_team("player", player_units)
         sim.add_team("enemy", enemy_units)
         self.all_sims[self.round_number] = sim
@@ -156,85 +159,6 @@ def load_game_data(json_path: str | Path) -> dict:
         return json.load(f)
 
 
-def run_draft_phase(shop, all_units, synergy_data, gold: int, seed: int,
-                     preset: str = "balanced") -> tuple[list[dict], list[dict]]:
-    """Фазa драфта: игрок и бот покупают юнитов.
-
-    Returns:
-        (player_units, enemy_units) — списки dict для боя
-    """
-    from game.core.bots import create_bot
-    import random
-
-    rng = random.Random(seed)
-
-    # Игрок: ролл магазина
-    shop_items = shop.roll(count=10)
-    player_gold = gold
-    player_units = []
-
-    # Покупаем лучших по соотношению сила/цена
-    for item in sorted(shop_items, key=lambda x: -x["cost"]):
-        if player_gold >= item["cost"]:
-            try:
-                shop.buy(Player(gold=player_gold), item["name"], cost=item["cost"])
-                # Упрощённо: покупаем и размещаем
-                player_gold -= item["cost"]
-            except ShopError:
-                pass
-
-    # Бот покупает юнитов
-    bot = create_bot(preset=preset, seed=seed)
-    bot_items = shop.roll(count=10)
-    enemy_units = []
-
-    for item in sorted(bot_items, key=lambda x: -x["cost"]):
-        if item["cost"] <= min(gold, 15):
-            try:
-                bot_player = Player(gold=item["cost"])
-                shop.buy(bot_player, item["name"], cost=item["cost"])
-                enemy_units.append(item)
-            except ShopError:
-                pass
-
-    # Преобразуем в формат для боя
-    player_unit_list = []
-    for item in shop_items[:6]:
-        if "name" in item and "cost" in item:
-            unit_data = all_units.get(item["name"])
-            if unit_data:
-                player_unit_list.append({
-                    "name": item["name"],
-                    "hp": unit_data["hp"],
-                    "damage": unit_data["damage"],
-                    "attack_speed": unit_data["attack_speed"],
-                    "range_": unit_data["range"],
-                    "class": unit_data["class"],
-                })
-
-    enemy_unit_list = []
-    for item in enemy_units[:6]:
-        if "name" in item and "cost" in item:
-            unit_data = all_units.get(item["name"])
-            if unit_data:
-                enemy_unit_list.append({
-                    "name": item["name"],
-                    "hp": unit_data["hp"],
-                    "damage": unit_data["damage"],
-                    "attack_speed": unit_data["attack_speed"],
-                    "range_": unit_data["range"],
-                    "class": unit_data["class"],
-                })
-
-    if not enemy_unit_list:
-        enemy_unit_list = [
-            {"name": "warrior_freshman", "hp": 500, "damage": 40,
-             "attack_speed": 1.2, "range_": 1, "class": "warrior"},
-        ]
-
-    return player_unit_list, enemy_unit_list
-
-
 def _bot_draft_with_shop(bot, draft_phase: DraftPhase, unit_data: dict, gold: int, player: Player) -> list[dict]:
     """Бот покупает юнитов из магазина и размещает на доску.
     
@@ -293,12 +217,15 @@ def _bot_draft_with_shop(bot, draft_phase: DraftPhase, unit_data: dict, gold: in
                 "attack_speed": ud["attack_speed"],
                 "range_": ud["range"],
                 "class": ud["class"],
+                "crit_chance": ud.get("crit_chance", 0),
+                "active": dict(ud["active"]) if ud.get("active") else None,
             })
-    
+
     if not enemy_unit_list:
         enemy_unit_list = [
             {"name": "warrior_freshman", "hp": 500, "damage": 40,
-             "attack_speed": 1.2, "range_": 1, "class": "warrior"},
+             "attack_speed": 1.2, "range_": 1, "class": "warrior",
+             "crit_chance": 10},
         ]
     
     return enemy_unit_list

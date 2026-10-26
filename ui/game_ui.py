@@ -19,6 +19,17 @@ _PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+# ── Раскладка фазы драфта (одна True на отрисовку и на клики мышью) ──────────
+# Хитбоксы и рисование обязаны использовать одни и те же числа, иначе
+# «невидимые» слоты остаются кликабельными, а видимые — нет.
+SHOP_X0, SHOP_Y0, SHOP_W, SHOP_H, SHOP_STEP = 20, 85, 100, 95, 110
+
+BENCH_X0, BENCH_Y0, BENCH_W, BENCH_H = 20, 235, 85, 26
+BENCH_COLS, BENCH_ROW_H, BENCH_MAX = 5, 32, 10
+
+BOARD_X0, BOARD_Y0, BOARD_W, BOARD_H = 20, 240, 85, 30   # BOARD_X0 += width // 3
+BOARD_COLS, BOARD_ROW_H = 3, 35
+
 
 # ── Visual effects system ────────────────────────────────────────────────
 
@@ -281,6 +292,9 @@ class GameUI:
         # Выделение в магазине (для мыши)
         self.selected_shop_idx = None
         self.selected_bench_idx = None
+        # Определения юнитов из data/units.json. Инициализируем сразу:
+        # крип-раунды (1-3) не заходят в драфт, но уже используют эти данные.
+        self.all_units: dict = {}
 
     def init(self):
         """Initialize pygame and fonts."""
@@ -536,12 +550,13 @@ class GameUI:
         shop_title = self.font_small.render("SHOP — R=roll N=next", True, (200, 200, 200))
         self.screen.blit(shop_title, (20, 65))
 
-        item_x = 20
+        item_x = SHOP_X0
+        slot_color = (60, 80, 100)
         for i, item in enumerate(shop_items[:10]):
-            x = item_x + i * 110
+            x = item_x + i * SHOP_STEP
             if x > self.width - 120:
                 break
-            color = (60, 80, 100)
+            color = slot_color
             name_key = item.get("name", "?")
             # Показываем русское имя из units.json вместо английского ключа
             if not name_key.startswith("ITEM:"):
@@ -567,9 +582,9 @@ class GameUI:
         bench_title = self.font_small.render(f"BENCH ({len(player.reserve)}) — D=place", True, (200, 200, 200))
         self.screen.blit(bench_title, (20, 205))
 
-        for i, unit_name in enumerate(player.reserve[:10]):
-            x = 20 + (i % 5) * ((self.width // 3 - 40) // 5)
-            y = 235 + (i // 5) * 32
+        for i, unit_name in enumerate(player.reserve[:BENCH_MAX]):
+            x = BENCH_X0 + (i % BENCH_COLS) * ((self.width // 3 - 40) // BENCH_COLS)
+            y = BENCH_Y0 + (i // BENCH_COLS) * BENCH_ROW_H
             # Переводим английский ключ на русское имя
             base = unit_name.split("★")[0]
             ru_name = self.all_units.get(base, {}).get("name", base)
@@ -578,8 +593,8 @@ class GameUI:
             # Подсветка выбранного bench slot
             border_color = (255, 255, 100) if i == self.selected_bench_idx else (200, 200, 200)
             border_width = 3 if i == self.selected_bench_idx else 1
-            pygame.draw.rect(self.screen, color, (x, y, 85, 26), border_radius=4)
-            pygame.draw.rect(self.screen, border_color, (x, y, 85, 26), width=border_width, border_radius=4)
+            pygame.draw.rect(self.screen, slot_color, (x, y, BENCH_W, BENCH_H), border_radius=4)
+            pygame.draw.rect(self.screen, border_color, (x, y, BENCH_W, BENCH_H), width=border_width, border_radius=4)
             name_surf = self.font_tiny.render(display_name, True, (255, 255, 255))
             self.screen.blit(name_surf, (x + 3, y + 4))
 
@@ -589,13 +604,14 @@ class GameUI:
         self.screen.blit(board_title, (self.width // 3 + 20, 205))
 
         for i, unit in enumerate(player.board[:6]):
-            x = self.width // 3 + 20 + (i % 3) * ((self.width // 3 - 40) // 3)
-            y = 240 + (i // 3) * 35
+            x = BOARD_X0 + self.width // 3 + (i % BOARD_COLS) * (
+                (self.width // 3 - 40) // BOARD_COLS)
+            y = BOARD_Y0 + (i // BOARD_COLS) * BOARD_ROW_H
             # Подсветка board slot (при наведении)
             border_color = (255, 255, 100) if self.selected_bench_idx is None and self.selected_shop_idx is None else (200, 200, 200)
             border_width = 2
-            pygame.draw.rect(self.screen, color, (x, y, 85, 30), border_radius=4)
-            pygame.draw.rect(self.screen, border_color, (x, y, 85, 30), width=border_width, border_radius=4)
+            pygame.draw.rect(self.screen, slot_color, (x, y, BOARD_W, BOARD_H), border_radius=4)
+            pygame.draw.rect(self.screen, border_color, (x, y, BOARD_W, BOARD_H), width=border_width, border_radius=4)
             # Переводим английский ключ на русское имя
             unit_name = unit.get("name", "?")
             base = unit_name.split("★")[0]
@@ -612,9 +628,14 @@ class GameUI:
         for idx, cls_name in enumerate(["warrior", "mage", "archer"]):
             count = player.get_synergy_count(cls_name)
             if count > 0:
-                color = (100, 255, 100) if count >= 2 else (200, 200, 100)
-                syn_text = self.font_tiny.render(f"{cls_name}: {count}", True, color)
+                syn_color = (100, 255, 100) if count >= 2 else (200, 200, 100)
+                syn_text = self.font_tiny.render(f"{cls_name}: {count}", True, syn_color)
                 self.screen.blit(syn_text, (syn_x, 225 + idx * 20))
+
+        # ── Inventory ───────────────────────────────────────────────────
+        # Раньше метод _draw_items_section() не вызывался нигде, поэтому
+        # купленные предметы было не видно.
+        self._draw_items_section(player.items)
 
         # ── Controls hint ───────────────────────────────────────────────
         controls = "W=Buy  S=Sell  D=Place  F=Remove  R=Roll  I=Item  A=Apply  Enter=Done  |  Клик: шоп/бенч/доска"
@@ -698,10 +719,9 @@ class GameUI:
         player = Player(gold=gold)
 
         if existing_units is None:
-            # First round — buy starting warrior
+            # First round — buy starting warrior (Shop сам списывает золото)
             try:
                 shop.buy(player, "warrior_freshman", cost=1)
-                player.gold -= 1
             except Exception:
                 pass
         else:
@@ -737,28 +757,35 @@ class GameUI:
                         if player.gold >= 1:
                             player.gold -= 1
                             try:
-                                shop_items = shop.roll(count=10)
+                                # роллим и юнитов, и предметы — иначе после
+                                # нажатия R из магазина пропадали предметы
+                                shop_items = self._mixed_roll(
+                                    shop, count=7, item_count=3)
                             except Exception:
                                 pass
 
                     elif key == pygame.K_n:
                         try:
-                            shop_items = shop.roll(count=10)
+                            shop_items = self._mixed_roll(
+                                shop, count=7, item_count=3)
                         except Exception:
                             pass
 
                     elif key == pygame.K_w:
+                        # Shop.buy() уже списывает золото — второй раз не вычитаем
                         try:
                             draft_phase.buy_unit(player, "warrior_freshman")
-                            player.gold -= 1
                         except Exception:
                             pass
 
                     elif key == pygame.K_s:
                         if player.reserve:
                             try:
-                                draft_phase.sell_unit(player, len(player.reserve) - 1)
-                                player.gold += 1
+                                sold = draft_phase.sell_unit(
+                                    player, len(player.reserve) - 1)
+                                # Возвращаем цену юнита, а не всегда 1
+                                player.gold += self.all_units.get(
+                                    sold.split("★")[0], {}).get("cost", 1)
                             except Exception:
                                 pass
 
@@ -808,13 +835,11 @@ class GameUI:
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     mx, my = event.pos
                     # ── SHOP items ──
-                    shop_x0, shop_y0, shop_w, shop_h = 20, 85, 100, 95
-                    shop_step = 110
                     for i, item in enumerate(shop_items[:10]):
-                        sx = shop_x0 + i * shop_step
+                        sx = SHOP_X0 + i * SHOP_STEP
                         if sx > self.width - 120:
                             break
-                        rect = pygame.Rect(sx, shop_y0, shop_w, shop_h)
+                        rect = pygame.Rect(sx, SHOP_Y0, SHOP_W, SHOP_H)
                         if rect.collidepoint(mx, my):
                             name = item.get("name", "")
                             if name.startswith("ITEM:"):
@@ -834,17 +859,12 @@ class GameUI:
                             self.selected_bench_idx = None
                             break
                     else:
-                        # ── BENCH ──
-                        bench_w = 85
-                        bench_h = 26
-                        bench_cols = 5
-                        bench_x0 = 20
-                        bench_y0 = 235
-                        cell_w = (self.width // 3 - 40) // bench_cols
-                        for i in range(len(player.reserve)):
-                            bx = bench_x0 + (i % bench_cols) * cell_w
-                            by = bench_y0 + (i // bench_cols) * bench_h
-                            rect = pygame.Rect(bx, by, bench_w, bench_h)
+                        # ── BENCH ── (те же координаты, что и при отрисовке)
+                        cell_w = (self.width // 3 - 40) // BENCH_COLS
+                        for i in range(min(len(player.reserve), BENCH_MAX)):
+                            bx = BENCH_X0 + (i % BENCH_COLS) * cell_w
+                            by = BENCH_Y0 + (i // BENCH_COLS) * BENCH_ROW_H
+                            rect = pygame.Rect(bx, by, BENCH_W, BENCH_H)
                             if rect.collidepoint(mx, my):
                                 if len(player.board) < 6:
                                     try:
@@ -864,16 +884,11 @@ class GameUI:
                                 break
                         else:
                             # ── BOARD ──
-                            board_w = 85
-                            board_h = 30
-                            board_cols = 3
-                            board_x0 = self.width // 3 + 20
-                            board_y0 = 240
-                            cell_w2 = (self.width // 3 - 40) // board_cols
+                            cell_w2 = (self.width // 3 - 40) // BOARD_COLS
                             for i in range(len(player.board)):
-                                cx = board_x0 + (i % board_cols) * cell_w2
-                                cy = board_y0 + (i // board_cols) * 35
-                                rect = pygame.Rect(cx, cy, board_w, board_h)
+                                cx = BOARD_X0 + self.width // 3 + (i % BOARD_COLS) * cell_w2
+                                cy = BOARD_Y0 + (i // BOARD_COLS) * BOARD_ROW_H
+                                rect = pygame.Rect(cx, cy, BOARD_W, BOARD_H)
                                 if rect.collidepoint(mx, my):
                                     try:
                                         draft_phase.remove_from_board(player, i)
@@ -918,16 +933,17 @@ class GameUI:
                     "attack_speed": ud["attack_speed"],
                     "range_": ud["range"],
                     "class": ud["class"],
+                    "crit_chance": ud.get("crit_chance", 0),
                 }
-                
+
                 # Add active ability if unit has one
                 if ud.get("active"):
                     unit_data["active"] = dict(ud["active"])
-                
+
                 # Check if this unit has item bonuses stored
                 if "item_bonuses" in unit:
                     unit_data["item_bonuses"] = unit["item_bonuses"]
-                
+
                 player_units.append(unit_data)
 
         if not player_units:
@@ -1032,29 +1048,23 @@ class GameUI:
             )
 
         # Draw dead units (faded)
+        # set_alpha на главной поверхности pygame не работает — прозрачность
+        # делаем затемнённым цветом карточки.
         for unit in player_units:
             if not unit.alive:
-                x,y = positions[unit]
-                rect_x = x - 70
-                rect_y = y - 25
-                self.screen.set_alpha(128)
+                x, y = positions[unit]
                 self.draw_unit(
                     {"name": unit.name, "hp": 0, "_base_hp": unit.max_hp},
-                    rect_x, rect_y, (60, 60, 60)
+                    x - 70, y - 25, (45, 45, 55)
                 )
-                self.screen.set_alpha(None)
 
         for unit in enemy_units:
             if not unit.alive:
                 x, y = positions[unit]
-                rect_x = x - 70
-                rect_y = y - 25
-                self.screen.set_alpha(128)
                 self.draw_unit(
                     {"name": unit.name, "hp": 0, "_base_hp": unit.max_hp},
-                    rect_x, rect_y, (60, 60, 60)
+                    x - 70, y - 25, (45, 45, 55)
                 )
-                self.screen.set_alpha(None)
 
         # Draw damage numbers on top of everything
         for dn in list(effects.get("damage_numbers", [])):
@@ -1090,6 +1100,90 @@ class GameUI:
                 ce.draw(self.screen, self.font_tiny)
             else:
                 effects["critical_effects"].remove(ce)
+
+    def _generate_battle_effects(self, sim, tick_count, last_processed_tick, effects):
+        """Создать визуальные эффекты для событий, произошедших между кадрами.
+
+        Единая реализация для run() и _animate_battle(): раньше логика была
+        скопирована дважды, и в копии для _animate_battle не было частиц
+        от попаданий и крит-вспышек — в игре они не появлялись.
+
+        Args:
+            sim: BattleSimulator
+            tick_count: текущий тик анимации
+            last_processed_tick: последний обработанный тик (-1 в начале)
+            effects: dict со списками эффектов (мутируется)
+        """
+        player_units = list(sim.teams.get("player", []))
+        enemy_units = list(sim.teams.get("enemy", []))
+        positions = self._get_unit_positions(player_units, enemy_units)
+
+        def find_unit(uid):
+            for u in player_units + enemy_units:
+                if u.unit_id == uid:
+                    return u
+            return None
+
+        # ── Линии атак: только события, новые с прошлого кадра ──────────
+        for evt in sim.get_attack_events(up_to_tick=tick_count):
+            if not (last_processed_tick < evt.get("tick", 0) <= tick_count):
+                continue
+            attacker = find_unit(evt.get("attacker_id"))
+            if not attacker:
+                continue
+            for target_id in evt.get("targets", []):
+                target = find_unit(target_id)
+                if not target:
+                    continue
+                a_pos = positions.get(attacker)
+                t_pos = positions.get(target)
+                if a_pos and t_pos:
+                    line_color = (255, 220, 60) if evt.get("is_critical") else (200, 200, 200)
+                    effects["lines"].append(
+                        AttackLine(a_pos[0], a_pos[1], t_pos[0], t_pos[1], line_color))
+
+        # ── Урон / смерть / способности за эти тики ─────────────────────
+        for event in sim.log:
+            if not (last_processed_tick < event.get("tick", 0) <= tick_count):
+                continue
+
+            etype = event.get("type", "")
+
+            # Попадание: цифра урона + частицы (+ вспышка на крите)
+            if etype in ("hit", "kill", "ability_hit", "ability_kill"):
+                target = find_unit(event.get("target_id"))
+                if target is None:
+                    continue
+                t_pos = positions.get(target)
+                if t_pos is None:
+                    continue
+                dmg = event.get("damage", 0)
+                is_kill = etype in ("kill", "ability_kill")
+                dmg_color = (255, 50, 50) if is_kill else (255, 100, 50)
+                effects["damage_numbers"].append(
+                    DamageNumber(t_pos[0], t_pos[1] - 30, dmg, dmg_color))
+                effects["hit_particles"].append(
+                    HitParticles(t_pos[0], t_pos[1],
+                                 is_critical=event.get("is_critical", False)))
+                if event.get("is_critical"):
+                    effects["critical_effects"].append(
+                        CriticalEffect(t_pos[0], t_pos[1], dmg))
+                if is_kill:
+                    effects["death_effects"].append(DeathEffect(t_pos[0], t_pos[1]))
+
+            # Способность: расширяющееся кольцо с названием
+            if (etype.startswith("ability") or "ability_name" in event
+                    or "caster_id" in event):
+                caster = find_unit(event.get("caster_id"))
+                if caster is not None and caster.alive:
+                    c_pos = positions.get(caster)
+                    if c_pos is not None:
+                        ability_name = event.get("ability_name", "Ability")
+                        # Тип берём из данных движка, а не угадываем по имени
+                        effect_type = event.get("ability_type") or "aoe_damage"
+                        effects["ability_effects"].append(
+                            AbilityEffect(c_pos[0], c_pos[1],
+                                          ability_name, effect_type))
 
     def wait_for_input(self):
         """Ждёт нажатия клавиши или клика мыши перед переходом к следующей фазе."""
@@ -1252,137 +1346,9 @@ class GameUI:
                 self.screen.fill(BG_COLOR)
                 self._draw_battle_scene(sim, effects, tick_count)
 
-                # Generate attack lines from events that happened up to this tick
-                positions = self._get_unit_positions(
-                    [u for u in sim.teams.get("player", [])],
-                    [u for u in sim.teams.get("enemy", [])]
-                )
-                
-                attack_events = sim.get_attack_events(up_to_tick=tick_count)
-                prev_events = sim.get_attack_events(up_to_tick=tick_count - 1) if tick_count > 0 else []
-                
-                # Only create lines for NEW events since last frame
-                new_events = [e for e in attack_events if e not in prev_events]
-                for evt in new_events:
-                    attacker_team = evt["attacker_team"]
-                    attacker_unit = None
-                    for u in sim.teams.get(attacker_team, []):
-                        if u.unit_id == evt["attacker_id"]:
-                            attacker_unit = u
-                            break
-                    
-                    if not attacker_unit:
-                        continue
-                    
-                    enemy_team = "enemy" if attacker_team == "player" else "player"
-                    for target_id in evt["targets"]:
-                        target_unit = None
-                        for u in sim.teams.get(enemy_team, []):
-                            if u.unit_id == target_id:
-                                target_unit = u
-                                break
-                        
-                        if not target_unit:
-                            continue
-                        
-                        attacker_pos = positions.get(attacker_unit)
-                        target_pos = positions.get(target_unit)
-                        
-                        if attacker_pos and target_pos:
-                            effects["lines"].append(
-                                AttackLine(attacker_pos[0], attacker_pos[1],
-                                          target_pos[0], target_pos[1])
-                            )
-                
-                # Generate damage numbers from log events (new since last tick)
-                for event in sim.log:
-                    if event.get("tick") == tick_count and event.get("type") in ("hit", "kill"):
-                        target_id = event.get("target_id")
-                        # Определяем команду атакующего из самого события (evt может не существовать)
-                        attacker_team = None
-                        for u in sim.teams.get("player", []) + sim.teams.get("enemy", []):
-                            if u.unit_id == event.get("attacker_id"):
-                                attacker_team = u.team
-                                break
-                        enemy_team = "enemy" if attacker_team == "player" else "player"
-                        target_unit = None
-                        for u in sim.teams.get(enemy_team, []):
-                            if u.unit_id == target_id:
-                                target_unit = u
-                                break
-                        
-                        target_pos = positions.get(target_unit) if target_unit else None
-                        if target_pos:
-                            dmg_color = (255, 100, 50) if event.get("type") != "kill" else (255, 50, 50)
-                            effects["damage_numbers"].append(
-                                DamageNumber(target_pos[0], target_pos[1] - 30,
-                                            event["damage"], dmg_color)
-                            )
-                            # Hit impact particles
-                            effects["hit_particles"].append(
-                                HitParticles(target_pos[0], target_pos[1],
-                                            is_critical=event.get("is_critical", False))
-                            )
-                            # Critical hit flash + enlarged number
-                            if event.get("is_critical", False):
-                                effects["critical_effects"].append(
-                                    CriticalEffect(target_pos[0], target_pos[1],
-                                                  event["damage"])
-                                )
-                
-                # Generate death effects from kill events at this tick
-                for event in sim.log:
-                    if event.get("tick") == tick_count and event.get("type") == "kill":
-                        target_id = event.get("target_id")
-                        # Определяем команду атакующего из самого события (evt может не существовать)
-                        attacker_team = None
-                        for u in sim.teams.get("player", []) + sim.teams.get("enemy", []):
-                            if u.unit_id == event.get("attacker_id"):
-                                attacker_team = u.team
-                                break
-                        enemy_team = "enemy" if attacker_team == "player" else "player"
-                        for u in sim.teams.get(enemy_team, []):
-                            if u.unit_id == target_id and not u.alive:
-                                target_pos = positions.get(u)
-                                if target_pos:
-                                    effects["death_effects"].append(
-                                        DeathEffect(target_pos[0], target_pos[1])
-                                    )
-                
-                # Generate ability visual effects from ability events at this tick
-                for event in sim.log:
-                    if event.get("tick") == tick_count and ("ability" in event.get("type", "") or "ability_name" in event):
-                        caster_id = event.get("caster_id")
-                        caster_unit = None
-                        for team_name, units in sim.teams.items():
-                            for u in units:
-                                if u.unit_id == caster_id and u.alive:
-                                    caster_unit = u
-                                    break
-                            if caster_unit:
-                                break
-                        
-                        if caster_unit:
-                            caster_pos = positions.get(caster_unit)
-                            if caster_pos:
-                                ability_name = event.get("ability_name", "Ability")
-                                # Determine effect type from ability name or data
-                                effect_type = "aoe_damage"  # default
-                                if "Огненный" in ability_name or "Fire" in ability_name:
-                                    effect_type = "aoe_damage"
-                                elif "Метеор" in ability_name:
-                                    effect_type = "aoe_damage"
-                                elif "Выстрел" in ability_name:
-                                    effect_type = "single_target_critical"
-                                elif "Щит" in ability_name:
-                                    effect_type = "buff_allies"
-                                elif "Волна" in ability_name or "slow" in str(event.get("type", "")).lower():
-                                    effect_type = "aoe_damage_slow"
-                                
-                                effects["ability_effects"].append(
-                                    AbilityEffect(caster_pos[0], caster_pos[1],
-                                                 ability_name, effect_type)
-                                )
+                # Визуальные эффекты: единая реализация на run() и _animate_battle()
+                self._generate_battle_effects(
+                    sim, tick_count, last_processed_tick, effects)
 
                 # Header for this round
                 self.draw_header(state.round_number, state.total_gold_after, state.is_creep)
@@ -1523,7 +1489,10 @@ class GameUI:
         from game.core.player import Player
         from game.core.bots import create_bot
         from game.core.economy import round_economy, calculate_interest
-        from game.core.synergies import calculate_synergy_bonuses
+        from game.core.synergies import (
+            calculate_synergy_bonuses, apply_synergy_bonuses,
+            calculate_passive_bonuses, apply_passive_bonuses,
+        )
         from game.battle.engine import BattleSimulator
         
         self.init()
@@ -1532,6 +1501,8 @@ class GameUI:
         project_root = Path(__file__).parent.parent.resolve()
         data = load_game_data(project_root / "data" / "units.json")
         all_units = data["units"]
+        # Доступно и для крип-раундов, где драфт не вызывается
+        self.all_units = all_units
         unit_costs = {name: info["cost"] for name, info in all_units.items()}
         
         BG_COLOR = (20, 20, 30)
@@ -1593,9 +1564,9 @@ class GameUI:
                     cost = unit_info.get("cost", 1)
                     if enemy_player.gold >= cost:
                         try:
+                            # buy_unit -> Shop.buy уже списывает золото
                             merged_name = draft_phase.buy_unit(enemy_player, name)
                             purchased.append(merged_name)
-                            enemy_player.gold -= cost
                         except Exception:
                             pass
                 
@@ -1617,6 +1588,7 @@ class GameUI:
                             "attack_speed": ud["attack_speed"],
                             "range_": ud["range"],
                             "class": ud["class"],
+                            "crit_chance": ud.get("crit_chance", 0),
                         }
                         if ud.get("active"):
                             eu["active"] = dict(ud["active"])
@@ -1628,6 +1600,14 @@ class GameUI:
                         {"name": "mage_acolyte", "hp": 300, "damage": 65, "attack_speed": 1.0, "range_": 4, "class": "mage"},
                     ]
             
+            # Бонусы синергий/пассивок — иначе в шапке написано "warrior: 2",
+            # а бой идёт на сырых статах из JSON
+            player_units = apply_synergy_bonuses(
+                player_units, calculate_synergy_bonuses(player_units, data["synergies"]))
+            if self.all_units:
+                passive = calculate_passive_bonuses(player_units, self.all_units)
+                player_units = apply_passive_bonuses(player_units, passive)
+
             # Run battle simulation
             sim = BattleSimulator(seed=seed + round_num)
             sim.add_team("player", player_units)
@@ -1711,19 +1691,16 @@ class GameUI:
         # ── Визуальный индикатор скорости ────────────────────────────────
         # speed_display_timer и ticks_per_frame берутся из self (сохраняются между раундами)
         
-        effects = {"damage_numbers": [], "death_effects": [], "lines": [], "ability_effects": []}
-        
+        effects = {"damage_numbers": [], "death_effects": [], "lines": [],
+                   "ability_effects": [], "hit_particles": [], "critical_effects": []}
+
         while self.running:
             # ── ОБРАБОТКА СОБЫТИЙ — ОДИН РАЗ ЗА ИТЕРАЦИЮ! ─────────────────
             # pygame.event.get() очищает очередь, поэтому вызываем только один раз.
             # Все последующие проверки используют сохранённые события.
             
             events = pygame.event.get()
-            
-            # Отладка: выводим количество событий и их типы
-            if events and tick_count % 30 == 0:  # каждые ~1 секунду
-                print(f"[DEBUG] Events: {len(events)}, types: {[e.type for e in events[:5]]}")
-            
+
             # Если нет фокуса — активируем окно
             if not pygame.display.get_active():
                 try:
@@ -1732,35 +1709,20 @@ class GameUI:
                     pass
             
             for event in events:
-                # Отладка: выводим ВСЮ информацию о событии
-                print(f"[RAW] type={event.type}, key={getattr(event, 'key', None)}, mod={getattr(event, 'mod', None)}")
-                
                 if event.type == pygame.QUIT:
                     return False
                 elif event.type == pygame.KEYDOWN:
-                    # Безопасно определяем ключ (K_ADD/K_SUBTRACT нет в pygame-ce!)
-                    key_name = "Unknown"
-                    if hasattr(event, 'key'):
-                        if event.key == pygame.K_SPACE: key_name = "Space"
-                        elif event.key == pygame.K_ESCAPE: key_name = "Esc"
-                        elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, getattr(pygame, 'K_KP_PLUS', None)): key_name = "+/="
-                        elif event.key in (pygame.K_MINUS, getattr(pygame, 'K_KP_MINUS', None)): key_name = "-"
-                    
-                    print(f"[KEY] {key_name} -> key={getattr(event, 'key', None)}")
-                    
-                    if getattr(event, 'key', None) == pygame.K_ESCAPE:
+                    key = event.key
+                    if key == pygame.K_ESCAPE:
                         return False
-                    elif getattr(event, 'key', None) == pygame.K_SPACE:
+                    elif key == pygame.K_SPACE:
                         paused = not paused
-                    elif getattr(event, 'key', None) in (pygame.K_PLUS, pygame.K_EQUALS, getattr(pygame, 'K_KP_PLUS', None)):
-                        old_speed = self.ticks_per_frame
+                    elif key in (pygame.K_PLUS, pygame.K_EQUALS,
+                                 getattr(pygame, 'K_KP_PLUS', None)):
                         self.ticks_per_frame = min(20, self.ticks_per_frame + 1)
-                        print(f"Speed UP -> {self.ticks_per_frame}")
                         self.speed_display_timer = 60  # показывать 2 секунды
-                    elif getattr(event, 'key', None) in (pygame.K_MINUS, getattr(pygame, 'K_KP_MINUS', None)):
-                        old_speed = self.ticks_per_frame
+                    elif key in (pygame.K_MINUS, getattr(pygame, 'K_KP_MINUS', None)):
                         self.ticks_per_frame = max(1, self.ticks_per_frame - 1)
-                        print(f"Speed DOWN -> {self.ticks_per_frame}")
                         self.speed_display_timer = 60  # показывать 2 секунды
             
             if paused:
@@ -1768,90 +1730,10 @@ class GameUI:
                 continue
             
             self.screen.fill(BG_COLOR)
-            
-            # Generate visual effects from battle log at this tick
-            player_units = [u for u in sim.teams.get("player", [])]
-            enemy_units = [u for u in sim.teams.get("enemy", [])]
-            positions = self._get_unit_positions(player_units, enemy_units)
-            
-            # Generate damage numbers and attack lines from damage events
-            if sim.log:
-                for evt in sim.log:
-                    if last_processed_tick < evt.get("tick", 0) <= tick_count:
-                        event_type = evt.get("type", "")
-                        
-                        # Damage events — show damage number on target
-                        if "damage" in event_type or ("attacker_id" in evt and "target_id" in evt):
-                            target_id = evt.get("target_id")
-                            target_unit = None
-                            for u in player_units + enemy_units:
-                                if u.unit_id == target_id:
-                                    target_unit = u
-                                    break
-                            target_pos = positions.get(target_unit) if target_unit else None
-                            if target_pos:
-                                dmg_color = (255, 100, 50) if event_type != "kill" else (255, 50, 50)
-                                effects["damage_numbers"].append(
-                                    DamageNumber(target_pos[0], target_pos[1] - 30,
-                                                evt.get("damage", 10), dmg_color)
-                                )
-                        
-                        # Attack lines — draw from attacker to target
-                        if "attacker_id" in evt and "target_id" in evt:
-                            attacker_id = evt.get("attacker_id")
-                            target_id = evt.get("target_id")
-                            attacker_unit = None
-                            target_unit = None
-                            for u in player_units + enemy_units:
-                                if u.unit_id == attacker_id:
-                                    attacker_unit = u
-                                if u.unit_id == target_id:
-                                    target_unit = u
-                            attacker_pos = positions.get(attacker_unit) if attacker_unit else None
-                            target_pos = positions.get(target_unit) if target_unit else None
-                            if attacker_pos and target_pos:
-                                line_color = (255, 200, 50) if evt.get("is_critical") else (200, 200, 200)
-                                effects["lines"].append(AttackLine(attacker_pos[0], attacker_pos[1], target_pos[0], target_pos[1], line_color))
-                        
-                        # Kill events — generate death effects
-                        if event_type == "kill":
-                            target_id = evt.get("target_id")
-                            attacker_team = evt.get("attacker_team")
-                            enemy_team = "enemy" if attacker_team == "player" else "player"
-                            for u in sim.teams.get(enemy_team, []):
-                                if u.unit_id == target_id and not u.alive:
-                                    target_pos = positions.get(u)
-                                    if target_pos:
-                                        effects["death_effects"].append(DeathEffect(target_pos[0], target_pos[1]))
-                        
-                        # Ability events — generate visual effects
-                        if "ability" in event_type or "ability_name" in evt:
-                            caster_id = evt.get("caster_id")
-                            caster_unit = None
-                            for u in player_units + enemy_units:
-                                if u.unit_id == caster_id and u.alive:
-                                    caster_unit = u
-                                    break
-                            if caster_unit:
-                                caster_pos = positions.get(caster_unit)
-                                if caster_pos:
-                                    ability_name = evt.get("ability_name", "Ability")
-                                    effect_type = "aoe_damage"
-                                    if "Огненный" in ability_name or "Fire" in ability_name:
-                                        effect_type = "aoe_damage"
-                                    elif "Метеор" in ability_name:
-                                        effect_type = "aoe_damage"
-                                    elif "Выстрел" in ability_name:
-                                        effect_type = "single_target_critical"
-                                    elif "Щит" in ability_name:
-                                        effect_type = "buff_allies"
-                                    elif "Волна" in ability_name or "slow" in str(evt.get("type", "")).lower():
-                                        effect_type = "aoe_damage_slow"
-                                    
-                                    effects["ability_effects"].append(
-                                        AbilityEffect(caster_pos[0], caster_pos[1],
-                                                     ability_name, effect_type)
-                                    )
+
+            # Визуальные эффекты: единая реализация на run() и _animate_battle()
+            self._generate_battle_effects(
+                sim, tick_count, last_processed_tick, effects)
 
             # Draw battle scene
             self._draw_battle_scene(sim, effects, tick_count)
