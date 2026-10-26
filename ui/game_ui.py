@@ -844,15 +844,23 @@ class GameUI:
             except Exception:
                 pass
         else:
-            # Restore previously bought units to reserve/board
+            # Восстанавливаем купленных юнитов. Они хранились с ДОСКИ, поэтому
+            # возвращаем их на доску. На бенч кладём только перелив, когда
+            # доска полна, — иначе один и тот же юнит существует дважды
+            # (и на бенче, и на доске) и игрок видит «клоны из ниоткуда».
             units = existing_units.get("units", [])
             for u in units:
                 name = u.get("name", "warrior_freshman")
                 star = u.get("star", 1)
-                display_name = name if "★" in name else name + ("★" * (star - 1) if star > 1 else "")
-                player.reserve.append(display_name)
+                # Формат имени внутренний: 'warrior_knight★2' (Shop так парсит).
+                # Повторение '★★' без цифры звёздность теряет.
+                if star > 1 and "★" not in name:
+                    name = f"{name}★{star}"
                 if len(player.board) < 6:
-                    player.board.append({"name": display_name, "star": star, **u.get("stats", {})})
+                    player.board.append(
+                        {"name": name, "star": star, **u.get("stats", {})})
+                else:
+                    player.reserve.append(name)
 
         # Mixed shop: units + items
         shop_items = self._mixed_roll(shop, count=7, item_count=3)
