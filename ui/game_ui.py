@@ -321,9 +321,33 @@ class GameUI:
         """Случайное число 0..1 для тряски."""
         return self.shake_rng.random()
 
+    def display_name(self, key: str) -> str:
+        """Русское имя юнита для отрисовки. key — ключ JSON или 'ключ★N'.
+
+        Бой оперирует ключами ('warrior_freshman'), а русские имена лежат
+        в data/units.json['units'][key]['name']. Раньше в бой уходил ключ
+        как есть — карточки в бою показывали 'warrior_freshman' вместо
+        «Новобранец», а tier_color (индекс по русским именам) всегда брал
+        дефолт. Плюс звёздность: 'ключ★2' -> «Рыцарь*».
+        """
+        if not key:
+            return "?"
+        base = key.split("★")[0]
+        ud = self.all_units.get(base)
+        ru = ud.get("name", key) if ud else key
+        star = self.star_suffix(key)
+        return ru + ("" if not star else " " + star)
+
     def tier_color(self, display_name: str):
-        """Цвет рамки по цене юнита. display_name — русское имя из JSON."""
-        cost = self._cost_by_display_name.get(display_name)
+        """Цвет рамки по цене юнита. display_name — русское имя из JSON.
+
+        Может прийти со звёздным суффиксом («Рыцарь *») — его отрезаем:
+        индекс цен построен по чистым именам, суффикс ломал поиск,
+        и звёздные юниты всегда получали дефолтный цвет.
+        """
+        base = display_name.rsplit(" " + STAR_CHAR, 1)[0] \
+            if (" " + STAR_CHAR) in display_name else display_name
+        cost = self._cost_by_display_name.get(base)
         if cost is None:
             return TIER_COLOR_DEFAULT
         return TIER_COLORS.get(cost, TIER_COLOR_DEFAULT)
@@ -1151,12 +1175,12 @@ class GameUI:
             ability_cooldown = unit.ability_cooldown
             ability_cooldown_max = unit.active_ability.get("cooldown", 0) if unit.active_ability else 0
             self.draw_unit(
-                {"name": unit.name, "hp": unit.hp, "_base_hp": unit.max_hp},
+                {"name": self.display_name(unit.name), "hp": unit.hp, "_base_hp": unit.max_hp},
                 rect_x, rect_y, PLAYER_COLOR, target=surf,
                 ability_name=ability_name,
                 ability_cooldown=ability_cooldown,
                 ability_cooldown_max=ability_cooldown_max,
-                tier_color=self.tier_color(unit.name),
+                tier_color=self.tier_color(self.display_name(unit.name)),
             )
 
         for unit in enemy_units:
@@ -1169,12 +1193,12 @@ class GameUI:
             ability_cooldown = unit.ability_cooldown
             ability_cooldown_max = unit.active_ability.get("cooldown", 0) if unit.active_ability else 0
             self.draw_unit(
-                {"name": unit.name, "hp": unit.hp, "_base_hp": unit.max_hp},
+                {"name": self.display_name(unit.name), "hp": unit.hp, "_base_hp": unit.max_hp},
                 rect_x, rect_y, ENEMY_COLOR, target=surf,
                 ability_name=ability_name,
                 ability_cooldown=ability_cooldown,
                 ability_cooldown_max=ability_cooldown_max,
-                tier_color=self.tier_color(unit.name),
+                tier_color=self.tier_color(self.display_name(unit.name)),
             )
 
         # Draw dead units (faded)
@@ -1184,7 +1208,7 @@ class GameUI:
             if not unit.alive:
                 x, y = positions[unit]
                 self.draw_unit(
-                    {"name": unit.name, "hp": 0, "_base_hp": unit.max_hp},
+                    {"name": self.display_name(unit.name), "hp": 0, "_base_hp": unit.max_hp},
                     x - 70, y - 25, (45, 45, 55), target=surf
                 )
 
@@ -1192,7 +1216,7 @@ class GameUI:
             if not unit.alive:
                 x, y = positions[unit]
                 self.draw_unit(
-                    {"name": unit.name, "hp": 0, "_base_hp": unit.max_hp},
+                    {"name": self.display_name(unit.name), "hp": 0, "_base_hp": unit.max_hp},
                     x - 70, y - 25, (45, 45, 55), target=surf
                 )
 
