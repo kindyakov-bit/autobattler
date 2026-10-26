@@ -3,29 +3,19 @@
     "warrior": {
       "name": "Воин",
       "thresholds": [2, 4],
-      "bonuses": {
-        "2": {"hp_bonus_pct": 15},
-        "4": {"hp_bonus_pct": 30}
-      }
+      "bonuses": {"2": {"hp_bonus_pct": 15}, "4": {"hp_bonus_pct": 30}}
     },
     "mage": {
       "name": "Маг",
       "thresholds": [2, 4],
-      "bonuses": {
-        "2": {"mana_per_kill": 5},
-        "4": {"mana_per_kill": 10}
-      }
+      "bonuses": {"2": {"mana_per_kill": 5}, "4": {"mana_per_kill": 10}}
     },
     "archer": {
       "name": "Стрелок",
       "thresholds": [2, 4],
-      "bonuses": {
-        "2": {"attack_speed_pct": 15},
-        "4": {"attack_speed_pct": 30}
-      }
+      "bonuses": {"2": {"attack_speed_pct": 15}, "4": {"attack_speed_pct": 30}}
     }
   },
-
   "units": {
     "warrior_freshman": {
       "name": "Новобранец",
@@ -35,6 +25,7 @@
       "damage": 40,
       "attack_speed": 1.2,
       "range": 1,
+      "crit_chance": 10,
       "description": "Базовый воин ближнего боя.",
       "passive": {
         "name": "Твёрдая кожа",
@@ -53,6 +44,7 @@
       "damage": 55,
       "attack_speed": 1.0,
       "range": 1,
+      "crit_chance": 10,
       "description": "Опытный воин с большим запасом здоровья.",
       "passive": {
         "name": "Железная воля",
@@ -71,6 +63,7 @@
       "damage": 75,
       "attack_speed": 0.9,
       "range": 1,
+      "crit_chance": 10,
       "description": "Элитный воин ближнего боя.",
       "passive": {
         "name": "Боевой клич",
@@ -81,10 +74,10 @@
       },
       "active": {
         "name": "Боевой клич",
-        "desc": "Пассивный урон +5 к ближайшим врагам за каждого союзного воина",
+        "desc": "Даёт +5 к урону за каждого союзного воина на 6 тиков",
         "type": "aura",
         "cooldown": 3,
-        "effect": {"bonus_damage_per_warrior": 5}
+        "effect": {"bonus_damage_per_ally": 5, "duration": 6}
       }
     },
     "warrior_knight": {
@@ -95,6 +88,7 @@
       "damage": 95,
       "attack_speed": 0.8,
       "range": 1,
+      "crit_chance": 10,
       "description": "Тяжёлый рыцарь — танк команды.",
       "passive": {
         "name": "Несокрушимость",
@@ -105,13 +99,12 @@
       },
       "active": {
         "name": "Щитовая стена",
-        "desc": "Снижает входящий урон на 30% для всех союзников в радиусе 1 (на 2 тика)",
+        "desc": "Снижает входящий урон на 30% всем союзникам на 20 тиков",
         "type": "buff_allies",
         "cooldown": 4,
-        "effect": {"damage_reduction_pct": 30, "duration": 2}
+        "effect": {"damage_reduction_pct": 30, "duration": 20}
       }
     },
-
     "mage_acolyte": {
       "name": "Послушник",
       "cost": 1,
@@ -120,6 +113,7 @@
       "damage": 65,
       "attack_speed": 1.0,
       "range": 4,
+      "crit_chance": 10,
       "description": "Базовый маг дальнего боя.",
       "passive": {
         "name": "Магическая аура",
@@ -138,6 +132,7 @@
       "damage": 85,
       "attack_speed": 0.9,
       "range": 4,
+      "crit_chance": 10,
       "description": "Сильный маг с высоким уроном.",
       "passive": {
         "name": "Усиление магии",
@@ -162,6 +157,7 @@
       "damage": 120,
       "attack_speed": 0.8,
       "range": 5,
+      "crit_chance": 10,
       "description": "Мощный маг с увеличенной дальностью.",
       "passive": {
         "name": "Великая магия",
@@ -186,6 +182,7 @@
       "damage": 160,
       "attack_speed": 0.7,
       "range": 6,
+      "crit_chance": 10,
       "description": "Легендарный маг — самый высокий урон.",
       "passive": {
         "name": "Вечная мудрость",
@@ -196,13 +193,17 @@
       },
       "active": {
         "name": "Волна разрушения",
-        "desc": "Наносит 200 урона всем врагам и замедляет на 1 тик",
+        "desc": "Наносит 200 урона всем врагам и замедляет их на 30% на 10 тиков",
         "type": "aoe_damage_slow",
         "cooldown": 5,
-        "effect": {"damage": 200, "radius": 3, "slow_duration": 1}
+        "effect": {
+          "damage": 200,
+          "radius": 3,
+          "slow_pct": 30,
+          "slow_duration": 10
+        }
       }
     },
-
     "archer_scout": {
       "name": "Скаут",
       "cost": 1,
@@ -211,6 +212,7 @@
       "damage": 45,
       "attack_speed": 1.5,
       "range": 3,
+      "crit_chance": 15,
       "description": "Базовый стрелок ближнего дальнего боя.",
       "passive": {
         "name": "Зоркий глаз",
@@ -229,6 +231,7 @@
       "damage": 65,
       "attack_speed": 1.4,
       "range": 3,
+      "crit_chance": 15,
       "description": "Опытный стрелок с хорошим уроном.",
       "passive": {
         "name": "Следящий глаз",
@@ -239,10 +242,10 @@
       },
       "active": {
         "name": "Огненные стрелы",
-        "desc": "Следующая атака наносит +50 урона всем врагам в радиусе 1",
+        "desc": "Следующая атака наносит +50 урона и бьёт до 3 врагов с переднего края",
         "type": "buff_next_attack",
         "cooldown": 3,
-        "effect": {"bonus_damage": 50, "radius": 1}
+        "effect": {"bonus_damage": 50, "radius": 2, "duration": 60}
       }
     },
     "archer_marksman": {
@@ -253,6 +256,7 @@
       "damage": 95,
       "attack_speed": 1.2,
       "range": 5,
+      "crit_chance": 20,
       "description": "Дальнобойный снайпер.",
       "passive": {
         "name": "Меткий глаз",
@@ -277,6 +281,7 @@
       "damage": 140,
       "attack_speed": 1.6,
       "range": 4,
+      "crit_chance": 15,
       "description": "Легендарный стрелок — высокий урон и скорость.",
       "passive": {
         "name": "Сердце воина",
@@ -287,10 +292,15 @@
       },
       "active": {
         "name": "Дождь из стрел",
-        "desc": "Наносит 180 урона всем врагам в радиусе 2, +20% скорости на 3 тика",
+        "desc": "Наносит 180 урона всем врагам в радиусе 2, +20% скорости атаки на 20 тиков",
         "type": "aoe_damage_buff",
         "cooldown": 5,
-        "effect": {"damage": 180, "radius": 2, "speed_buff_duration": 3, "speed_bonus_pct": 20}
+        "effect": {
+          "damage": 180,
+          "radius": 2,
+          "speed_bonus_pct": 20,
+          "speed_bonus_duration": 20
+        }
       }
     }
   }
