@@ -8,13 +8,52 @@ class ShopError(Exception):
 
 
 class Shop:
-    """Управление магазином и слиянием юнитов + предметов."""
+    """Управление магазином и слиянием юнитов + предметов.
+
+    Уровень магазина (1..6): растёт автоматически каждый раунд и может
+    быть докуплен за золото (upgrade_cost). Чем выше уровень, тем дороже
+    юниты в ролле — «сначала в магазине только низкоуровневые».
+    """
+
+    #: Максимальная стоимость юнита, который может выпасть на уровне N.
+    MAX_COST_BY_LEVEL = {1: 1, 2: 2, 3: 3, 4: 3, 5: 4, 6: 5}
+
+    #: Цена апгрейда магазина до следующего уровня (за золото).
+    UPGRADE_COSTS = {1: 6, 2: 8, 3: 10, 4: 12, 5: 14}
 
     def __init__(self, pool, unit_costs: dict = None, item_data: dict = None, rng: random.Random = None):
         self.pool = pool
         self.unit_costs = unit_costs or {}  # name -> cost
         self.item_data = item_data or {}  # item_name -> item_info
         self.rng = rng or random.Random()
+        self.level = 1
+
+    @property
+    def upgrade_cost(self):
+        """Цена следующего апгрейда (None = максимальный уровень)."""
+        return self.UPGRADE_COSTS.get(self.level)
+
+    def upgrade(self, player=None) -> bool:
+        """Поднять уровень магазина за золото игрока.
+
+        Возвращает True, если уровень вырос. Без player — бесплатное
+        повышение (используется автоматическим ростом по раундам).
+        """
+        if self.level >= max(self.MAX_COST_BY_LEVEL):
+            return False
+        if player is not None:
+            cost = self.UPGRADE_COSTS.get(self.level)
+            if cost is None or player.gold < cost:
+                return False
+            player.gold -= cost
+        self.level += 1
+        return True
+
+    def _roll_candidates(self) -> list[str]:
+        """Кандидаты ролла: юниты в пуле, чья цена <= потолка уровня."""
+        max_cost = self.MAX_COST_BY_LEVEL.get(self.level, 1)
+        return [u for u, c in self.unit_costs.items()
+                if c <= max_cost and self.pool.available(u) > 0]
 
     def buy(self, player, name: str, cost: int = 1) -> str:
         """Покупка одной копии: списывает gold, берёт копию из пула,
@@ -120,14 +159,21 @@ class Shop:
         return returned_name
 
     def roll(self, count: int = 5) -> list[dict]:
-        """Ролл магазина: получить случайные юниты из пула."""
-        available_units = list(self.pool.remaining.keys())
-        if not available_units:
+        """Ролл магазина: случайные юниты из пула.
+
+        Уровень магазина ограничивает потолок цены: на 1-м уровне
+        выпадают только cost 1, на 2-м — cost 1-2, и так далее. Пока в
+        пуле нет подходящих (дорогие раскуплены), роллим из всех доступных.
+        """
+        candidates = self._roll_candidates()
+        if not candidates:
+            candidates = [u for u in self.pool.remaining if self.pool.available(u) > 0]
+        if not candidates:
             raise ShopError("пул пуст")
 
         shop_items = []
         for _ in range(count):
-            unit_name = self.rng.choice(available_units)
+            unit_name = self.rng.choice(candidates)
             cost = self.unit_costs.get(unit_name, 1)
             shop_items.append({"name": unit_name, "cost": cost})
         return shop_items

@@ -44,6 +44,9 @@ TIER_COLOR_DEFAULT = (150, 150, 150)
 # рисуется квадратом-заглушкой, поэтому используем '*'.
 STAR_CHAR = "*"
 
+# Килл-бонус: золото за каждого убитого врага (экономика «фарм на боях»).
+KILL_GOLD_PER_UNIT = 1
+
 
 # ── Visual effects system ────────────────────────────────────────────────
 
@@ -656,7 +659,8 @@ class GameUI:
         self.screen.blit(ctrl_surf, (self.width // 2 - 200, self.height - 40))
 
     def _draw_interactive_draft(self, player, shop_items: list[dict], gold: int,
-                                 round_num: int, is_creep: bool, synergy_data: dict):
+                                 round_num: int, is_creep: bool, synergy_data: dict,
+                                 shop=None):
         """Draw interactive draft phase with keyboard controls."""
         self.screen.fill((20, 30, 40))
 
@@ -675,6 +679,16 @@ class GameUI:
         pygame.draw.rect(self.screen, (40, 60, 80), (10, 55, self.width - 20, 130), border_radius=8)
         shop_title = self.font_small.render("SHOP — R=roll N=next", True, (200, 200, 200))
         self.screen.blit(shop_title, (20, 65))
+
+        # Уровень магазина: от него зависит потолок цен в ролле.
+        # U = апгрейд за золото (цена растёт с уровнем)
+        lvl = getattr(shop, "level", 1) if shop is not None else 1
+        up_cost = shop.upgrade_cost if shop is not None else None
+        up_text = f"U=upgrade(${up_cost})" if up_cost else "U=max"
+        lvl_color = (255, 215, 0) if up_cost else (150, 200, 150)
+        lvl_surf = self.font_small.render(
+            f"Shop lvl {lvl}  {up_text}", True, lvl_color)
+        self.screen.blit(lvl_surf, (self.width - 280, 65))
 
         item_x = SHOP_X0
         slot_color = (60, 80, 100)
@@ -853,6 +867,15 @@ class GameUI:
         rng = random.Random(seed + round_num * 100)
         pool = Pool(unit_costs)
         shop = Shop(pool, unit_costs=unit_costs, item_data=items_data.get("items", {}), rng=rng)
+
+        # Уровень магазина переживает раунды: авто-рост каждый раунд
+        # (кроме первого) + докупка за золото клавишей U
+        if not hasattr(self, "shop_level"):
+            self.shop_level = 1
+        if round_num > 1:
+            # авто-рост: каждый новый раунд магазин подрастает (макс. 6)
+            self.shop_level = min(6, self.shop_level + 1)
+        shop.level = self.shop_level
         draft_phase = DraftPhase(shop, all_units)
 
         self.all_units = all_units  # Для отображения имён на русском в магазине
@@ -921,6 +944,17 @@ class GameUI:
                                 shop, count=7, item_count=3)
                         except Exception:
                             pass
+
+                    elif key == pygame.K_u:
+                        # Апгрейд магазина за золото (механика прокачки)
+                        if shop.upgrade(player):
+                            self.shop_level = shop.level
+                            self.play_sound("gold")
+                            try:
+                                shop_items = self._mixed_roll(
+                                    shop, count=7, item_count=3)
+                            except Exception:
+                                pass
 
                     elif key == pygame.K_w:
                         # Shop.buy() уже списывает золото — второй раз не вычитаем
@@ -1062,6 +1096,7 @@ class GameUI:
                 round_num=round_num,
                 is_creep=is_creep,
                 synergy_data=synergy_data,
+                shop=shop,
             )
 
             pygame.display.flip()
@@ -1803,11 +1838,18 @@ class GameUI:
             creep_win = is_creep and battle_result["winner"] == "player"
             surviving_enemies = sum(
                 1 for u in sim.teams.get("enemy", []) if u.alive)
+            # Килл-бонус: +1 золота за каждого убитого врага
+            # (kill-события с killer_team=player; ability_kill не существует,
+            # в движке смерть от способности тоже пишется как "kill")
+            kills = sum(1 for e in sim.log
+                        if e.get("type") == "kill"
+                        and e.get("killer_team") == "player")
+            kill_gold = KILL_GOLD_PER_UNIT * kills
             econ = round_economy(
                 gold=gold, pvp_win=pvp_win, creep_win=creep_win,
                 hp=hp, is_creep=is_creep,
                 surviving_enemy_units=surviving_enemies)
-            gold = econ["gold_after"]
+            gold = econ["gold_after"] + kill_gold
             hp = econ["hp_after"]
             eliminated = econ["is_eliminated"]
 
@@ -1816,6 +1858,7 @@ class GameUI:
                 "is_creep": is_creep,
                 "gold_earned": econ["income"],
                 "interest_earned": econ["interest"],
+                "kill_gold": kill_gold,
                 "total_gold_after": gold,
                 "hp": hp,
                 "hp_lost": econ["hp_lost"],
