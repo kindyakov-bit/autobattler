@@ -30,6 +30,20 @@ BENCH_COLS, BENCH_ROW_H, BENCH_MAX = 5, 32, 10
 BOARD_X0, BOARD_Y0, BOARD_W, BOARD_H = 20, 240, 85, 30   # BOARD_X0 += width // 3
 BOARD_COLS, BOARD_ROW_H = 3, 35
 
+# Цвет рамки по цене юнита — как в TFT/Underlords: сразу видно, что дорого.
+# Ключ — цена из data/units.json.
+TIER_COLORS = {
+    1: (150, 150, 150),   # обычный
+    2: (90, 200, 120),    # необычный
+    3: (90, 150, 255),    # редкий
+    5: (200, 120, 255),   # легендарный
+}
+TIER_COLOR_DEFAULT = (150, 150, 150)
+
+# Символ звезды. '★' (U+2605) отсутствует в стандартных шрифтах pygame и
+# рисуется квадратом-заглушкой, поэтому используем '*'.
+STAR_CHAR = "*"
+
 
 # ── Visual effects system ────────────────────────────────────────────────
 
@@ -286,6 +300,7 @@ class GameUI:
         self.font_large = None
         self.font_small = None
         self.font_tiny = None
+        self.font_micro = None
         # Скорость анимации — сохраняется между раундами
         self.ticks_per_frame = 1
         self.speed_display_timer = 0
@@ -295,6 +310,56 @@ class GameUI:
         # Определения юнитов из data/units.json. Инициализируем сразу:
         # крип-раунды (1-3) не заходят в драфт, но уже используют эти данные.
         self.all_units: dict = {}
+        self._cost_by_display_name: dict = {}
+        # Звук и тряска экрана (можно отключить флагом)
+        self.sound_enabled = True
+        self.sound = None
+        self.shake = 0                # текущая сила тряски в пикселях
+        self.shake_rng = random.Random(1234)   # свой RNG, чтобы не жевать seed боя
+        self.battle_surface = None    # для тряски рисуем бой на отдельный слой
+
+    def rng_shake(self) -> float:
+        """Случайное число 0..1 для тряски."""
+        return self.shake_rng.random()
+
+    def tier_color(self, display_name: str):
+        """Цвет рамки по цене юнита. display_name — русское имя из JSON."""
+        cost = self._cost_by_display_name.get(display_name)
+        if cost is None:
+            return TIER_COLOR_DEFAULT
+        return TIER_COLORS.get(cost, TIER_COLOR_DEFAULT)
+
+    @staticmethod
+    def star_suffix(name: str) -> str:
+        """'*','**' по звёздности из имени вида warrior_knight★2."""
+        if STAR_CHAR in name:
+            tail = name.split(STAR_CHAR, 1)[1]
+            digits = "".join(ch for ch in tail if ch.isdigit())
+            if digits:
+                return STAR_CHAR * (int(digits) - 1)
+        if "★" in name:                      # на случай старых данных
+            tail = name.split("★", 1)[1]
+            digits = "".join(ch for ch in tail if ch.isdigit())
+            if digits:
+                return STAR_CHAR * (int(digits) - 1)
+        return ""
+
+    def fit_text(self, text: str, max_width: int, font=None) -> str:
+        """Обрезать текст с '…', чтобы он влезал в фиксированный бокс."""
+        font = font or self.font_tiny
+        if font.size(text)[0] <= max_width:
+            return text
+        out = text
+        while out and font.size(out + "…")[0] > max_width:
+            out = out[:-1]
+        return out + "…"
+
+    def _rebuild_cost_index(self):
+        """Индекс «русское имя -> цена» для цветовых тиров."""
+        self._cost_by_display_name = {
+            ud.get("name", key): ud.get("cost", 1)
+            for key, ud in self.all_units.items()
+        }
 
     def init(self):
         """Initialize pygame and fonts."""
@@ -303,25 +368,42 @@ class GameUI:
         pygame.display.set_caption("AutoBattler MVP - Real-time Battle")
         self.clock = pygame.time.Clock()
 
+        from game.audio import SoundBank
+        self.sound = SoundBank(enabled=self.sound_enabled)
+
+        # Отдельный слой боя — только для эффекта тряски
+        self.battle_surface = pygame.Surface((self.width, self.height))
+
         try:
             self.font_large = pygame.font.SysFont("arial", 28, bold=True)
             self.font_small = pygame.font.SysFont("arial", 18)
             self.font_tiny = pygame.font.SysFont("arial", 14)
+            # Мельче tiny — для бенча и доски, где слоты узкие
+            self.font_micro = pygame.font.SysFont("arial", 11)
         except Exception:
             self.font_large = pygame.font.Font(None, 28)
             self.font_small = pygame.font.Font(None, 18)
             self.font_tiny = pygame.font.Font(None, 14)
+            self.font_micro = pygame.font.Font(None, 16)
 
-    def draw_unit(self, unit_dict, x, y, team_color,
-                  ability_name=None, ability_cooldown=0, ability_cooldown_max=0):
-        """Draw a unit with HP bar and ability cooldown indicator."""
+    def draw_unit(self, unit_dict, x, y, team_color, target=None,
+                  ability_name=None, ability_cooldown=0, ability_cooldown_max=0,
+                  tier_color=None):
+        """Draw a unit with HP bar and ability cooldown indicator.
+
+        target=None рисует на главный экран (драфт, результаты);
+        при тряске бой рисуется на отдельный слой.
+        tier_color — цвет рамки по цене юнита (см. TIER_COLORS).
+        """
+        surf = target if target is not None else self.screen
         name = unit_dict.get("name", "?")
         hp = unit_dict.get("hp", 0)
         max_hp = unit_dict.get("_base_hp", unit_dict.get("hp", 100))
 
         rect_w, rect_h = 140, 50
-        pygame.draw.rect(self.screen, team_color, (x, y, rect_w, rect_h), border_radius=6)
-        pygame.draw.rect(self.screen, (255, 255, 255), (x, y, rect_w, rect_h), width=1, border_radius=6)
+        pygame.draw.rect(surf, team_color, (x, y, rect_w, rect_h), border_radius=6)
+        pygame.draw.rect(surf, tier_color or (255, 255, 255),
+                         (x, y, rect_w, rect_h), width=1, border_radius=6)
 
         # HP bar
         hp_pct = max(0, min(1.0, hp / max(max_hp, 1)) if max_hp > 0 else 0)
@@ -334,19 +416,19 @@ class GameUI:
             bar_color = (200, 40, 40)
 
         if bar_w > 0:
-            pygame.draw.rect(self.screen, bar_color,
+            pygame.draw.rect(surf, bar_color,
                            (x + 4, y + rect_h - 10, bar_w, 6), border_radius=3)
 
         # Unit name
         name_surf = self.font_tiny.render(name, True, (255, 255, 255))
-        self.screen.blit(name_surf, (x + 4, y + 6))
+        surf.blit(name_surf, (x + 4, y + 6))
 
         # Ability name + cooldown indicator
         if ability_name:
             ready = ability_cooldown <= 0
             ability_color = (100, 255, 100) if ready else (255, 220, 50)
             ability_surf = self.font_tiny.render(ability_name, True, ability_color)
-            self.screen.blit(ability_surf, (x + 4, y + 22))
+            surf.blit(ability_surf, (x + 4, y + 22))
 
             # Cooldown progress ring (right side of unit card)
             ring_cx = x + rect_w - 20
@@ -354,32 +436,52 @@ class GameUI:
             ring_r = 12
             ring_w = 3
             # Background ring
-            pygame.draw.circle(self.screen, (60, 60, 60), (ring_cx, ring_cy), ring_r, ring_w)
+            pygame.draw.circle(surf, (60, 60, 60), (ring_cx, ring_cy), ring_r, ring_w)
             if not ready and ability_cooldown_max > 0:
                 # Filled arc showing remaining cooldown
                 progress = 1.0 - (ability_cooldown / ability_cooldown_max)
                 end_angle = -90 + progress * 360
                 # Draw arc as series of lines
-                import math
                 for angle in range(-90, int(end_angle)):
                     rad = math.radians(angle)
                     px = ring_cx + int(math.cos(rad) * ring_r)
                     py = ring_cy + int(math.sin(rad) * ring_r)
-                    pygame.draw.circle(self.screen, ability_color, (px, py), 2)
+                    pygame.draw.circle(surf, ability_color, (px, py), 2)
             else:
                 # Ready — solid fill
-                pygame.draw.circle(self.screen, (100, 255, 100), (ring_cx, ring_cy), ring_r - 1)
+                pygame.draw.circle(surf, (100, 255, 100), (ring_cx, ring_cy), ring_r - 1)
 
         # HP text
         hp_text = f"{int(hp)}/{max_hp}"
         hp_surf = self.font_tiny.render(hp_text, True, (200, 200, 200))
-        self.screen.blit(hp_surf, (x + 4, y + rect_h - 8))
+        surf.blit(hp_surf, (x + 4, y + rect_h - 8))
 
-    def draw_header(self, round_num, gold, is_creep):
-        """Draw header with round info."""
+    def play_sound(self, name: str, volume: float = 1.0):
+        """Проиграть звук, если звук включён."""
+        if self.sound is None:
+            return
+        self.sound.play(name, volume)
+
+    def add_shake(self, amount: float):
+        """Добавить тряску экрана (в пикселях, максимум 14)."""
+        self.shake = min(14.0, self.shake + amount)
+
+    def draw_header(self, round_num, gold, is_creep, hp=None):
+        """Draw header with round info and player's match HP."""
         status = "CREEP" if is_creep else "PvP"
-        text = f"Round {round_num} [{status}]  Gold: {gold}"
-        surf = self.font_small.render(text, True, (255, 255, 100))
+        if hp is None:
+            text = f"Раунд {round_num} [{status}]   Золото: {gold}"
+            color = (255, 255, 100)
+        else:
+            text = (f"Раунд {round_num} [{status}]   Золото: {gold}   "
+                    f"HP: {hp}")
+            if hp <= 30:
+                color = (255, 80, 80)     # опасно
+            elif hp <= 60:
+                color = (255, 200, 60)    # предупреждение
+            else:
+                color = (255, 255, 100)
+        surf = self.font_small.render(text, True, color)
         self.screen.blit(surf, (16, 8))
 
     def draw_battle_log(self, log, max_lines=6):
@@ -397,12 +499,13 @@ class GameUI:
             surf = self.font_tiny.render(text, True, color)
             self.screen.blit(surf, (self.width - 350, y_start + i * 20))
 
-    def draw_vs(self, cx, cy):
+    def draw_vs(self, cx, cy, target=None):
         """Draw VS separator between teams."""
-        pygame.draw.line(self.screen, (100, 100, 100),
+        surf = target if target is not None else self.screen
+        pygame.draw.line(surf, (100, 100, 100),
                         (cx - 3, 60), (cx - 3, self.height - 200), width=2)
         vs_surf = self.font_large.render("VS", True, (255, 255, 255))
-        self.screen.blit(vs_surf, (cx - 28, cy))
+        surf.blit(vs_surf, (cx - 28, cy))
 
     def draw_result(self, winner, ticks):
         """Draw result overlay."""
@@ -571,11 +674,16 @@ class GameUI:
             pygame.draw.rect(self.screen, color, (x, 85, 100, 95), border_radius=6)
             pygame.draw.rect(self.screen, border_color, (x, 85, 100, 95), width=border_width, border_radius=6)
 
-            name_surf = self.font_tiny.render(name, True, (255, 255, 255))
+            name_surf = self.font_tiny.render(
+                self.fit_text(name, SHOP_W - 10), True, (255, 255, 255))
             self.screen.blit(name_surf, (x + 5, 90))
 
             cost_surf = self.font_tiny.render(f"${cost}", True, (255, 215, 0))
             self.screen.blit(cost_surf, (x + 5, 110))
+
+            # Рамка тира — сразу видно, что за юнит в слоте
+            if border_color != (255, 255, 100):
+                border_color = self.tier_color(name)
 
         # ── BENCH section ───────────────────────────────────────────────
         pygame.draw.rect(self.screen, (30, 50, 70), (10, 195, self.width // 3 - 20, 180), border_radius=8)
@@ -588,14 +696,19 @@ class GameUI:
             # Переводим английский ключ на русское имя
             base = unit_name.split("★")[0]
             ru_name = self.all_units.get(base, {}).get("name", base)
-            stars = unit_name[len(base):] if unit_name.startswith(base) else ""
-            display_name = ru_name + stars
+            # Звёздность — через '*', иначе глиф '★' рисуется заглушкой
+            display_name = ru_name + self.star_suffix(unit_name)
             # Подсветка выбранного bench slot
-            border_color = (255, 255, 100) if i == self.selected_bench_idx else (200, 200, 200)
+            if i == self.selected_bench_idx:
+                border_color = (255, 255, 100)
+            else:
+                border_color = self.tier_color(display_name)
             border_width = 3 if i == self.selected_bench_idx else 1
             pygame.draw.rect(self.screen, slot_color, (x, y, BENCH_W, BENCH_H), border_radius=4)
             pygame.draw.rect(self.screen, border_color, (x, y, BENCH_W, BENCH_H), width=border_width, border_radius=4)
-            name_surf = self.font_tiny.render(display_name, True, (255, 255, 255))
+            name_surf = self.font_micro.render(
+                self.fit_text(display_name, BENCH_W - 8, self.font_micro),
+                True, (255, 255, 255))
             self.screen.blit(name_surf, (x + 3, y + 4))
 
         # ── BOARD section ───────────────────────────────────────────────
@@ -608,7 +721,10 @@ class GameUI:
                 (self.width // 3 - 40) // BOARD_COLS)
             y = BOARD_Y0 + (i // BOARD_COLS) * BOARD_ROW_H
             # Подсветка board slot (при наведении)
-            border_color = (255, 255, 100) if self.selected_bench_idx is None and self.selected_shop_idx is None else (200, 200, 200)
+            if self.selected_bench_idx is None and self.selected_shop_idx is None:
+                border_color = (255, 255, 100)
+            else:
+                border_color = self.tier_color(display_name)
             border_width = 2
             pygame.draw.rect(self.screen, slot_color, (x, y, BOARD_W, BOARD_H), border_radius=4)
             pygame.draw.rect(self.screen, border_color, (x, y, BOARD_W, BOARD_H), width=border_width, border_radius=4)
@@ -616,9 +732,10 @@ class GameUI:
             unit_name = unit.get("name", "?")
             base = unit_name.split("★")[0]
             ru_name = self.all_units.get(base, {}).get("name", base)
-            stars = unit_name[len(base):] if unit_name.startswith(base) else ""
-            display_name = ru_name + stars
-            name_surf = self.font_tiny.render(display_name, True, (255, 255, 255))
+            display_name = ru_name + self.star_suffix(unit_name)
+            name_surf = self.font_micro.render(
+                self.fit_text(display_name, BOARD_W - 8, self.font_micro),
+                True, (255, 255, 255))
             self.screen.blit(name_surf, (x + 3, y + 4))
 
         # ── Synergy info ────────────────────────────────────────────────
@@ -714,6 +831,7 @@ class GameUI:
         draft_phase = DraftPhase(shop, all_units)
 
         self.all_units = all_units  # Для отображения имён на русском в магазине
+        self._rebuild_cost_index()
 
         gold = 10 if existing_units is None else existing_units.get("gold", 10)
         player = Player(gold=gold)
@@ -853,6 +971,7 @@ class GameUI:
                                 # Юнит
                                 try:
                                     draft_phase.buy_unit(player, name)
+                                    self.play_sound("buy")
                                 except Exception:
                                     pass
                             self.selected_shop_idx = i
@@ -979,21 +1098,23 @@ class GameUI:
 
         return positions
 
-    def _draw_battle_scene(self, sim, effects, frame_idx=0):
+    def _draw_battle_scene(self, sim, effects, frame_idx=0, target=None):
         """Draw the current state of a battle with visual effects.
-        
+
         Args:
             sim: BattleSimulator instance
             effects: dict with visual effect lists (populated during drawing)
             frame_idx: index into sim._tick_history (0 = initial state)
+            target: surface to draw on (default self.screen). Нужен для тряски.
         """
         PLAYER_COLOR = (40, 80, 160)
         ENEMY_COLOR = (160, 50, 50)
+        surf = target if target is not None else self.screen
 
         # Restore state from snapshot at the given frame index
         if frame_idx > 0 and frame_idx <= len(sim._tick_history):
             sim.restore_from_snapshot(sim._tick_history[frame_idx - 1])
-        
+
         player_units = [u for u in sim.teams.get("player", [])]
         enemy_units = [u for u in sim.teams.get("enemy", [])]
 
@@ -1001,14 +1122,12 @@ class GameUI:
         positions = self._get_unit_positions(player_units, enemy_units)
 
         # Draw VS separator
-        cx = self.width // 2
-        cy = 100
-        self.draw_vs(cx, cy)
+        self.draw_vs(self.width // 2, 100, target=surf)
 
         # Draw attack lines first (behind units)
         for line in list(effects.get("lines", [])):
             if line.update():
-                line.draw(self.screen)
+                line.draw(surf)
             else:
                 effects["lines"].remove(line)
 
@@ -1024,10 +1143,11 @@ class GameUI:
             ability_cooldown_max = unit.active_ability.get("cooldown", 0) if unit.active_ability else 0
             self.draw_unit(
                 {"name": unit.name, "hp": unit.hp, "_base_hp": unit.max_hp},
-                rect_x, rect_y, PLAYER_COLOR,
+                rect_x, rect_y, PLAYER_COLOR, target=surf,
                 ability_name=ability_name,
                 ability_cooldown=ability_cooldown,
                 ability_cooldown_max=ability_cooldown_max,
+                tier_color=self.tier_color(unit.name),
             )
 
         for unit in enemy_units:
@@ -1041,10 +1161,11 @@ class GameUI:
             ability_cooldown_max = unit.active_ability.get("cooldown", 0) if unit.active_ability else 0
             self.draw_unit(
                 {"name": unit.name, "hp": unit.hp, "_base_hp": unit.max_hp},
-                rect_x, rect_y, ENEMY_COLOR,
+                rect_x, rect_y, ENEMY_COLOR, target=surf,
                 ability_name=ability_name,
                 ability_cooldown=ability_cooldown,
                 ability_cooldown_max=ability_cooldown_max,
+                tier_color=self.tier_color(unit.name),
             )
 
         # Draw dead units (faded)
@@ -1055,7 +1176,7 @@ class GameUI:
                 x, y = positions[unit]
                 self.draw_unit(
                     {"name": unit.name, "hp": 0, "_base_hp": unit.max_hp},
-                    x - 70, y - 25, (45, 45, 55)
+                    x - 70, y - 25, (45, 45, 55), target=surf
                 )
 
         for unit in enemy_units:
@@ -1063,41 +1184,41 @@ class GameUI:
                 x, y = positions[unit]
                 self.draw_unit(
                     {"name": unit.name, "hp": 0, "_base_hp": unit.max_hp},
-                    x - 70, y - 25, (45, 45, 55)
+                    x - 70, y - 25, (45, 45, 55), target=surf
                 )
 
         # Draw damage numbers on top of everything
         for dn in list(effects.get("damage_numbers", [])):
             if dn.update():
-                dn.draw(self.screen, self.font_tiny)
+                dn.draw(surf, self.font_tiny)
             else:
                 effects["damage_numbers"].remove(dn)
 
         # Draw death effects
         for de in list(effects.get("death_effects", [])):
             if de.update():
-                de.draw(self.screen)
+                de.draw(surf)
             else:
                 effects["death_effects"].remove(de)
 
         # Draw ability effects (expanding rings + particles)
         for ae in list(effects.get("ability_effects", [])):
             if ae.update():
-                ae.draw(self.screen)
+                ae.draw(surf)
             else:
                 effects["ability_effects"].remove(ae)
 
         # Draw hit impact particles
         for hp in list(effects.get("hit_particles", [])):
             if hp.update():
-                hp.draw(self.screen)
+                hp.draw(surf)
             else:
                 effects["hit_particles"].remove(hp)
 
         # Draw critical hit flash + enlarged number
         for ce in list(effects.get("critical_effects", [])):
             if ce.update():
-                ce.draw(self.screen, self.font_tiny)
+                ce.draw(surf, self.font_tiny)
             else:
                 effects["critical_effects"].remove(ce)
 
@@ -1114,8 +1235,13 @@ class GameUI:
             last_processed_tick: последний обработанный тик (-1 в начале)
             effects: dict со списками эффектов (мутируется)
         """
-        player_units = list(sim.teams.get("player", []))
-        enemy_units = list(sim.teams.get("enemy", []))
+        # Движок допускает любые имена команд, поэтому берём первые две
+        # по порядку: первая — слева, вторая — справа.
+        # (Раньше здесь был хардкод "player"/"enemy", который молча ломался
+        # на симуляторах с другими именами.)
+        teams = [u for u in sim.teams.values()]
+        player_units = list(teams[0]) if len(teams) > 0 else []
+        enemy_units = list(teams[1]) if len(teams) > 1 else []
         positions = self._get_unit_positions(player_units, enemy_units)
 
         def find_unit(uid):
@@ -1159,17 +1285,27 @@ class GameUI:
                     continue
                 dmg = event.get("damage", 0)
                 is_kill = etype in ("kill", "ability_kill")
+                is_crit = bool(event.get("is_critical"))
                 dmg_color = (255, 50, 50) if is_kill else (255, 100, 50)
                 effects["damage_numbers"].append(
                     DamageNumber(t_pos[0], t_pos[1] - 30, dmg, dmg_color))
                 effects["hit_particles"].append(
-                    HitParticles(t_pos[0], t_pos[1],
-                                 is_critical=event.get("is_critical", False)))
-                if event.get("is_critical"):
+                    HitParticles(t_pos[0], t_pos[1], is_critical=is_crit))
+                if is_crit:
                     effects["critical_effects"].append(
                         CriticalEffect(t_pos[0], t_pos[1], dmg))
+                    self.add_shake(3.5)          # крит трясёт
                 if is_kill:
                     effects["death_effects"].append(DeathEffect(t_pos[0], t_pos[1]))
+                    self.add_shake(2.0)
+
+                # Звук: крит звонче, смерть ниже, обычный удар — хлопок
+                if is_kill:
+                    self.play_sound("kill")
+                elif is_crit:
+                    self.play_sound("crit")
+                else:
+                    self.play_sound("hit", 0.7)
 
             # Способность: расширяющееся кольцо с названием
             if (etype.startswith("ability") or "ability_name" in event
@@ -1184,6 +1320,8 @@ class GameUI:
                         effects["ability_effects"].append(
                             AbilityEffect(c_pos[0], c_pos[1],
                                           ability_name, effect_type))
+                        self.play_sound("ability")
+                        self.add_shake(2.5)
 
     def wait_for_input(self):
         """Ждёт нажатия клавиши или клика мыши перед переходом к следующей фазе."""
@@ -1488,7 +1626,7 @@ class GameUI:
         from game.core.draft import DraftPhase
         from game.core.player import Player
         from game.core.bots import create_bot
-        from game.core.economy import round_economy, calculate_interest
+        from game.core.economy import round_economy, calculate_interest, START_HP
         from game.core.synergies import (
             calculate_synergy_bonuses, apply_synergy_bonuses,
             calculate_passive_bonuses, apply_passive_bonuses,
@@ -1503,6 +1641,7 @@ class GameUI:
         all_units = data["units"]
         # Доступно и для крип-раундов, где драфт не вызывается
         self.all_units = all_units
+        self._rebuild_cost_index()
         unit_costs = {name: info["cost"] for name, info in all_units.items()}
         
         BG_COLOR = (20, 20, 30)
@@ -1510,41 +1649,41 @@ class GameUI:
         ENEMY_COLOR = (160, 50, 50)
         
         gold = 10
+        hp = START_HP
         history = []  # list of round result dicts
         all_sims = {}  # round_num -> BattleSimulator
-        # Хранилище купленных пользователем юнитов между PvP-раундами (не сбрасывается на волнах крипов)
+        # Купленные юниты между раундами. Крип-раунды их не сбрасывают.
         stored_player_units = None
-        
+
         for round_num in range(1, 9):
             # Раунды 1-3 — крипы, потом каждый третий (6, 9, ...) — крип, остальные — PvP
             is_creep = round_num <= 3 or round_num % 3 == 0
-            
+
+            # ── Драфт игрока. С ПЕРВОГО раунда. ────────────────────────────
+            # Раньше крип-раунды шли с захардкоженным составом, то есть три
+            # раунда из восьми были кат-сценой без единого решения игрока.
+            existing = {"units": stored_player_units, "gold": gold} \
+                if stored_player_units else None
+            result = self._run_interactive_draft(
+                round_num=round_num,
+                is_creep=is_creep,
+                synergy_data=data["synergies"],
+                seed=seed,
+                existing_units=existing,
+            )
+            if result is None:
+                return  # user quit
+            player_units, gold = result
+            stored_player_units = player_units
+
             if is_creep:
-                # Auto-fill creep round (with abilities from units.json)
+                # Крипы — фиксированный состав врага
                 enemy_units = [
                     dict(all_units["warrior_freshman"]),
                     dict(all_units["archer_scout"]),
                 ]
-                player_units = [
-                    dict(all_units["warrior_freshman"]),
-                    dict(all_units["mage_acolyte"]),
-                ]
             else:
-                # Interactive draft for player — carry over units from previous PvP round
-                existing = {"units": stored_player_units, "gold": gold} if stored_player_units else None
-                result = self._run_interactive_draft(
-                    round_num=round_num,
-                    is_creep=False,
-                    synergy_data=data["synergies"],
-                    seed=seed,
-                    existing_units=existing,
-                )
-                if result is None:
-                    return  # user quit
-                player_units, gold = result
-                stored_player_units = player_units  # Сохраняем купленные юниты для следующего PvP-раунда
-                
-                # Bot drafts enemy units via shop — bot has its own economy (independent of player)
+                # Bot drafts enemy units via shop — bot has its own economy (independent from player)
                 bot_gold = 20  # bot economy — enough for a full board
                 bot = create_bot(preset=enemy_bot, seed=seed + round_num)
                 rng = random.Random(seed + round_num * 100)
@@ -1615,18 +1754,29 @@ class GameUI:
             battle_result = sim.run(max_ticks=600)
             total_ticks = sim.get_total_ticks()
             
-            # Economy
+            # Economy + HP: проигранный PvP бьёт тем сильнее,
+            # чем больше врагов уцелело
             pvp_win = not is_creep and battle_result["winner"] == "player"
             creep_win = is_creep and battle_result["winner"] == "player"
-            econ = round_economy(gold=gold, pvp_win=pvp_win, creep_win=creep_win)
+            surviving_enemies = sum(
+                1 for u in sim.teams.get("enemy", []) if u.alive)
+            econ = round_economy(
+                gold=gold, pvp_win=pvp_win, creep_win=creep_win,
+                hp=hp, is_creep=is_creep,
+                surviving_enemy_units=surviving_enemies)
             gold = econ["gold_after"]
-            
+            hp = econ["hp_after"]
+            eliminated = econ["is_eliminated"]
+
             state = {
                 "round_number": round_num,
                 "is_creep": is_creep,
                 "gold_earned": econ["income"],
                 "interest_earned": econ["interest"],
                 "total_gold_after": gold,
+                "hp": hp,
+                "hp_lost": econ["hp_lost"],
+                "eliminated": eliminated,
                 "battle_result": battle_result,
                 "total_ticks": total_ticks,
             }
@@ -1645,6 +1795,10 @@ class GameUI:
                 return  # user quit
             
             # ── Pause between rounds so user can see results ────────────
+            # Звук итога раунда: золото всегда, вылет — своей темой
+            self.play_sound("gold")
+            if eliminated:
+                self.play_sound("lose")
             for _ in range(90):  # ~3 seconds at 30fps
                 if not self.running:
                     return
@@ -1652,17 +1806,30 @@ class GameUI:
                     if event.type == pygame.QUIT:
                         self.running = False
                 self.clock.tick(30)
-        
+
+            # Здоровье кончилось — матч проигран
+            if eliminated:
+                break
+
         # ── Final result ────────────────────────────────────────────────
         self.screen.fill(BG_COLOR)
-        
+
         player_wins = sum(1 for s in history if s["battle_result"]["winner"] == "player")
-        winner = "player" if player_wins > len(history) - player_wins else "enemy"
-        
-        self.draw_result(winner.upper(), "?")
-        
+        if eliminated:
+            winner = "enemy"
+            verdict = "ВЫЛЕТЕЛИ"
+        else:
+            winner = "player" if player_wins > len(history) - player_wins else "enemy"
+            verdict = "ПОБЕДА" if winner == "player" else "ПОРАЖЕНИЕ"
+
+        self.draw_result(verdict, "?")
+        self.play_sound("win" if winner == "player" else "lose")
+        if eliminated:
+            self.add_shake(10.0)      # вылет бьёт по нервам
+
         summary_surf = self.font_small.render(
-            f"You won {player_wins}/{len(history)} rounds", True, (200, 200, 200))
+            f"Раундов выиграно: {player_wins}/{len(history)}   |   HP: {hp}",
+            True, (200, 200, 200))
         r = summary_surf.get_rect(center=(self.width // 2, self.height // 2 + 50))
         self.screen.blit(summary_surf, r)
         
@@ -1735,13 +1902,28 @@ class GameUI:
             self._generate_battle_effects(
                 sim, tick_count, last_processed_tick, effects)
 
+            # Тряска экрана: бой рисуем на отдельный слой и блитим со смещением.
+            # Иначе пришлось бы протаскивать offset во все вызовы draw_*.
+            if self.shake > 0.3:
+                surf = self.battle_surface
+                surf.fill(BG_COLOR)
+                self._draw_battle_scene(sim, effects, tick_count, target=surf)
+                ox = int(self.shake * (self.rng_shake() * 2 - 1))
+                oy = int(self.shake * (self.rng_shake() * 2 - 1))
+                self.screen.blit(surf, (ox, oy))
+                self.shake *= 0.86            # затухание
+            else:
+                self.shake = 0
+                self._draw_battle_scene(sim, effects, tick_count)
+
             # Draw battle scene
             self._draw_battle_scene(sim, effects, tick_count)
             
             # Header
             is_creep = state["is_creep"]
             status = "CREEP" if is_creep else "PvP"
-            self.draw_header(state["round_number"], state["total_gold_after"], is_creep)
+            self.draw_header(state["round_number"], state["total_gold_after"],
+                         is_creep, hp=state.get("hp"))
             
             # Battle log
             if sim.log:
@@ -1802,7 +1984,16 @@ class GameUI:
                 gold_surf = self.font_tiny.render(gold_text, True, (150, 255, 150))
                 r = gold_surf.get_rect(center=(self.width // 2, self.height // 2 + 70))
                 self.screen.blit(gold_surf, r)
-                
+
+                # Потеря здоровья — важнее золота, показываем отдельно
+                hp_lost = state.get("hp_lost", 0)
+                if hp_lost:
+                    hp_text = f"-{hp_lost} HP  (осталось {state.get('hp', '?')})"
+                    hp_color = (255, 90, 90) if state.get("hp", 100) <= 30 else (255, 180, 90)
+                    hp_surf = self.font_small.render(hp_text, True, hp_color)
+                    r = hp_surf.get_rect(center=(self.width // 2, self.height // 2 + 95))
+                    self.screen.blit(hp_surf, r)
+
                 pygame.display.flip()
                 for _ in range(90):
                     if not self.running: return False
