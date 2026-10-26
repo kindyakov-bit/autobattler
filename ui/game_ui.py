@@ -1,0 +1,1952 @@
+"""Pygame UI for AutoBattler MVP with real-time animated battles.
+
+Features:
+  - Tick-by-tick battle animation for each round
+  - Visual effects (damage numbers, death animations)
+  - Pause/resume (SPACE), speed control (+/-)
+  - Round progress dots at bottom
+  - Interactive draft phase (W=Buy S=Sell D=Place F=Remove R=Roll Enter=Done)
+"""
+
+import math
+import random
+import time
+import pygame
+import sys
+from pathlib import Path
+
+_PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+
+# ── Visual effects system ────────────────────────────────────────────────
+
+class DamageNumber:
+    """Floating damage number that appears on a unit."""
+    def __init__(self, x, y, amount, color=(255, 100, 50)):
+        self.x = x
+        self.y = y
+        self.amount = int(amount)
+        self.color = color
+        self.life = 40  # frames to live
+        self.max_life = 40
+
+    def update(self):
+        self.y -= 1.5
+        self.life -= 1
+        return self.life > 0
+
+    def draw(self, screen, font):
+        alpha = min(1.0, self.life / self.max_life) * 255
+        surf = font.render(f"-{self.amount}", True, self.color)
+        # Draw with slight shadow for readability
+        sx, sy = int(self.x), int(self.y)
+        screen.blit(surf, (sx - 1, sy + 1))
+        screen.blit(surf, (sx + 1, sy + 1))
+        screen.blit(surf, (sx, sy))
+
+
+class DeathEffect:
+    """Visual effect when a unit dies."""
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.life = 30
+        self.max_life = 30
+        # Spawn particles
+        self.particles = []
+        for _ in range(8):
+            angle = (2 * math.pi / 8) * _ + 0.1
+            speed = 1.5 + random.uniform(-0.5, 0.5)
+            self.particles.append({
+                'vx': math.cos(angle) * speed,
+                'vy': math.sin(angle) * speed - 1.0,
+                'size': 2 + random.randint(0, 3),
+                'color': (200, 50, 50),
+            })
+
+    def update(self):
+        self.life -= 1
+        alive = []
+        for p in self.particles:
+            p['vx'] *= 0.96
+            p['vy'] *= 0.96
+            if self.life > 0:
+                alive.append(p)
+        return self.life > 0
+
+    def draw(self, screen):
+        alpha = min(1.0, self.life / self.max_life)
+        for p in self.particles:
+            size = int(p['size'] * alpha)
+            if size > 0:
+                pygame.draw.circle(screen, p['color'],
+                                   (int(self.x + p['vx'] * (30 - self.life)),
+                                    int(self.y + p['vy'] * (30 - self.life))),
+                                   max(1, size))
+
+
+class AttackLine:
+    """Visual line showing an attack from attacker to target."""
+    def __init__(self, x1, y1, x2, y2, color=None):
+        self.x1, self.y1 = x1, y1
+        self.x2, self.y2 = x2, y2
+        self.life = 8
+        self.color = color
+
+    def update(self):
+        self.life -= 1
+        return self.life > 0
+
+    def draw(self, screen):
+        alpha = min(1.0, self.life / 8) * 255
+        if self.color is not None:
+            color = (int(self.color[0] * alpha / 255), int(self.color[1] * alpha / 255), int(self.color[2] * alpha / 255))
+        else:
+            color = (int(255 * alpha / 255), int(200 * alpha / 255), int(50 * alpha / 255))
+        width = max(1, int(3 * alpha / 255))
+        pygame.draw.line(screen, color, (self.x1, self.y1), (self.x2, self.y2), width)
+
+
+class HitParticles:
+    """Particle burst on hit impact."""
+    def __init__(self, x, y, is_critical=False):
+        self.x = x
+        self.y = y
+        self.life = 20
+        self.max_life = 20
+        color = (255, 255, 50) if is_critical else (255, 150, 50)
+        self.particles = []
+        count = 12 if is_critical else 6
+        for _ in range(count):
+            angle = random.uniform(0, 2 * math.pi)
+            speed = random.uniform(1.0, 3.0) if is_critical else random.uniform(0.5, 2.0)
+            self.particles.append({
+                'vx': math.cos(angle) * speed,
+                'vy': math.sin(angle) * speed,
+                'size': random.randint(2, 4) if is_critical else random.randint(1, 3),
+                'color': color,
+            })
+
+    def update(self):
+        self.life -= 1
+        alive = []
+        for p in self.particles:
+            p['vx'] *= 0.92
+            p['vy'] *= 0.92
+            p['vy'] += 0.15  # slight gravity
+            if self.life > 0:
+                alive.append(p)
+        self.particles = alive
+        return self.life > 0
+
+    def draw(self, screen):
+        alpha = min(1.0, self.life / self.max_life)
+        for p in self.particles:
+            size = max(1, int(p['size'] * alpha))
+            if size > 0:
+                pygame.draw.circle(screen, p['color'],
+                                   (int(self.x + p['vx'] * (20 - self.life)),
+                                    int(self.y + p['vy'] * (20 - self.life))),
+                                   size)
+
+
+class CriticalEffect:
+    """Flash + enlarged damage number for critical hits."""
+    def __init__(self, x, y, amount):
+        self.x = x
+        self.y = y
+        self.amount = int(amount)
+        self.life = 25
+        self.max_life = 25
+        self.flash_radius = 0
+        self.max_flash_radius = 60
+
+    def update(self):
+        self.life -= 1
+        self.flash_radius = int(self.max_flash_radius * (1 - self.life / self.max_life))
+        return self.life > 0
+
+    def draw(self, screen, font):
+        alpha = min(1.0, self.life / self.max_life)
+        # Flash ring
+        flash_color = (255, int(200 * alpha), int(50 * alpha))
+        width = max(1, int(4 * alpha))
+        if self.flash_radius > 0:
+            pygame.draw.circle(screen, flash_color, (int(self.x), int(self.y)), self.flash_radius, width)
+        # Enlarged damage number
+        surf = font.render(f"-{self.amount}!", True, (255, 255, 100))
+        surf.set_alpha(int(255 * alpha))
+        r = surf.get_rect(center=(int(self.x), int(self.y) - 10))
+        screen.blit(surf, r)
+
+
+class AbilityEffect:
+    """Visual effect when an ability is cast — expanding ring + particles."""
+    
+    # Цвета для разных типов способностей
+    COLORS = {
+        "aoe_damage": ((255, 80, 30), (255, 200, 50)),      # оранжевый/жёлтый (огненный шар)
+        "aoe_damage_slow": ((100, 150, 255), (200, 220, 255)),  # синий (замедление)
+        "aoe_damage_buff": ((255, 50, 50), (255, 150, 100)),  # красно-оранжевый
+        "single_target_critical": ((255, 255, 50), (255, 200, 100)),  # жёлтый/золотой (крит)
+        "buff_allies": ((50, 200, 50), (100, 255, 100)),     # зелёный (бафф союзников)
+    }
+
+    def __init__(self, x, y, ability_name="", effect_type="aoe_damage", color=None):
+        self.x = x
+        self.y = y
+        self.ability_name = ability_name
+        self.effect_type = effect_type
+        self.max_life = 30
+        self.life = self.max_life
+        
+        # Expanding ring — starts small and grows
+        self.ring_max_radius = 70
+        self.ring_radius = 5
+        
+        # Particles — start spread out, fly outward
+        self.particles = []
+        colors = color or self.COLORS.get(effect_type, ((255, 255, 255), (200, 200, 200)))
+        for _ in range(16):
+            angle = random.uniform(0, 2 * math.pi)
+            speed = 1.5 + random.uniform(0.5, 3.0)
+            self.particles.append({
+                'angle': angle,
+                'speed': speed,
+                'size': 2 + random.randint(1, 4),
+                'color': random.choice(colors),
+            })
+
+    def update(self):
+        self.life -= 1
+        self.ring_radius = int(self.ring_max_radius * (1 - self.life / self.max_life))
+        return self.life > 0
+
+    def draw(self, screen):
+        alpha = self.life / self.max_life
+        
+        # Draw expanding ring — starts small, grows to max
+        progress = 1 - (self.life / self.max_life)  # 0→1 as life decreases
+        color = self.COLORS.get(self.effect_type, ((255, 255, 255), (200, 200, 200)))[0]
+        radius = int(5 + (self.ring_max_radius - 5) * progress)
+        if radius > 0:
+            pygame.draw.circle(screen, color, (int(self.x), int(self.y)), radius, 
+                             max(1, int(3 * alpha)))
+        
+        # Draw particles — fly outward from center
+        for p in self.particles:
+            dist = progress * (self.ring_max_radius + 20)
+            px = self.x + math.cos(p['angle']) * dist
+            py = self.y + math.sin(p['angle']) * dist
+            size = max(1, int(p['size'] * alpha))
+            if size > 0:
+                pygame.draw.circle(screen, p['color'], (int(px), int(py)), size)
+        
+        # Draw ability name above effect
+        if self.life > self.max_life - 5:
+            try:
+                _font = pygame.font.SysFont("arial", 16, bold=True)
+            except Exception:
+                _font = pygame.font.Font(None, 16)
+            name_surf = _font.render(self.ability_name.upper(), True, 
+                                  self.COLORS.get(self.effect_type, ((255, 255, 0)))[1])
+            r = name_surf.get_rect(center=(int(self.x), int(self.y) - self.ring_radius - 15))
+            screen.blit(name_surf, r)
+
+    def _font_render(self, text, bold, color):
+        try:
+            return pygame.font.SysFont("arial", 16, bold=bold).render(text, True, color)
+        except Exception:
+            return pygame.font.Font(None, 16).render(text, True, color)
+
+
+# ── Main UI class ────────────────────────────────────────────────────────
+
+class GameUI:
+    """Graphical interface for AutoBattler with real-time battle animation."""
+
+    def __init__(self, width=1200, height=800):
+        self.width = width
+        self.height = height
+        self.running = False
+        self.clock = None
+        self.font_large = None
+        self.font_small = None
+        self.font_tiny = None
+        # Скорость анимации — сохраняется между раундами
+        self.ticks_per_frame = 1
+        self.speed_display_timer = 0
+        # Выделение в магазине (для мыши)
+        self.selected_shop_idx = None
+        self.selected_bench_idx = None
+
+    def init(self):
+        """Initialize pygame and fonts."""
+        pygame.init()
+        self.screen = pygame.display.set_mode((self.width, self.height))
+        pygame.display.set_caption("AutoBattler MVP - Real-time Battle")
+        self.clock = pygame.time.Clock()
+
+        try:
+            self.font_large = pygame.font.SysFont("arial", 28, bold=True)
+            self.font_small = pygame.font.SysFont("arial", 18)
+            self.font_tiny = pygame.font.SysFont("arial", 14)
+        except Exception:
+            self.font_large = pygame.font.Font(None, 28)
+            self.font_small = pygame.font.Font(None, 18)
+            self.font_tiny = pygame.font.Font(None, 14)
+
+    def draw_unit(self, unit_dict, x, y, team_color,
+                  ability_name=None, ability_cooldown=0, ability_cooldown_max=0):
+        """Draw a unit with HP bar and ability cooldown indicator."""
+        name = unit_dict.get("name", "?")
+        hp = unit_dict.get("hp", 0)
+        max_hp = unit_dict.get("_base_hp", unit_dict.get("hp", 100))
+
+        rect_w, rect_h = 140, 50
+        pygame.draw.rect(self.screen, team_color, (x, y, rect_w, rect_h), border_radius=6)
+        pygame.draw.rect(self.screen, (255, 255, 255), (x, y, rect_w, rect_h), width=1, border_radius=6)
+
+        # HP bar
+        hp_pct = max(0, min(1.0, hp / max(max_hp, 1)) if max_hp > 0 else 0)
+        bar_w = int((rect_w - 8) * hp_pct)
+        if hp_pct > 0.5:
+            bar_color = (60, 200, 60)
+        elif hp_pct > 0.25:
+            bar_color = (220, 180, 40)
+        else:
+            bar_color = (200, 40, 40)
+
+        if bar_w > 0:
+            pygame.draw.rect(self.screen, bar_color,
+                           (x + 4, y + rect_h - 10, bar_w, 6), border_radius=3)
+
+        # Unit name
+        name_surf = self.font_tiny.render(name, True, (255, 255, 255))
+        self.screen.blit(name_surf, (x + 4, y + 6))
+
+        # Ability name + cooldown indicator
+        if ability_name:
+            ready = ability_cooldown <= 0
+            ability_color = (100, 255, 100) if ready else (255, 220, 50)
+            ability_surf = self.font_tiny.render(ability_name, True, ability_color)
+            self.screen.blit(ability_surf, (x + 4, y + 22))
+
+            # Cooldown progress ring (right side of unit card)
+            ring_cx = x + rect_w - 20
+            ring_cy = y + rect_h // 2
+            ring_r = 12
+            ring_w = 3
+            # Background ring
+            pygame.draw.circle(self.screen, (60, 60, 60), (ring_cx, ring_cy), ring_r, ring_w)
+            if not ready and ability_cooldown_max > 0:
+                # Filled arc showing remaining cooldown
+                progress = 1.0 - (ability_cooldown / ability_cooldown_max)
+                end_angle = -90 + progress * 360
+                # Draw arc as series of lines
+                import math
+                for angle in range(-90, int(end_angle)):
+                    rad = math.radians(angle)
+                    px = ring_cx + int(math.cos(rad) * ring_r)
+                    py = ring_cy + int(math.sin(rad) * ring_r)
+                    pygame.draw.circle(self.screen, ability_color, (px, py), 2)
+            else:
+                # Ready — solid fill
+                pygame.draw.circle(self.screen, (100, 255, 100), (ring_cx, ring_cy), ring_r - 1)
+
+        # HP text
+        hp_text = f"{int(hp)}/{max_hp}"
+        hp_surf = self.font_tiny.render(hp_text, True, (200, 200, 200))
+        self.screen.blit(hp_surf, (x + 4, y + rect_h - 8))
+
+    def draw_header(self, round_num, gold, is_creep):
+        """Draw header with round info."""
+        status = "CREEP" if is_creep else "PvP"
+        text = f"Round {round_num} [{status}]  Gold: {gold}"
+        surf = self.font_small.render(text, True, (255, 255, 100))
+        self.screen.blit(surf, (16, 8))
+
+    def draw_battle_log(self, log, max_lines=6):
+        """Draw battle event log on the right side."""
+        y_start = self.height - (max_lines * 20)
+        for i, event in enumerate(log[-max_lines:]):
+            if event.get("type") == "kill":
+                text = f"KILL tick {event.get('tick', '?')}"
+                color = (255, 100, 100)
+            else:
+                dmg = event.get("damage", 0)
+                text = f"[{event.get('tick', '?')}] hit: {dmg:.0f} dmg"
+                color = (200, 200, 200)
+
+            surf = self.font_tiny.render(text, True, color)
+            self.screen.blit(surf, (self.width - 350, y_start + i * 20))
+
+    def draw_vs(self, cx, cy):
+        """Draw VS separator between teams."""
+        pygame.draw.line(self.screen, (100, 100, 100),
+                        (cx - 3, 60), (cx - 3, self.height - 200), width=2)
+        vs_surf = self.font_large.render("VS", True, (255, 255, 255))
+        self.screen.blit(vs_surf, (cx - 28, cy))
+
+    def draw_result(self, winner, ticks):
+        """Draw result overlay."""
+        overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        self.screen.blit(overlay, (0, 0))
+
+        text = f"WINNER: {winner.upper()} ({ticks} ticks)"
+        surf = self.font_large.render(text, True, (255, 255, 100))
+        rect = surf.get_rect(center=(self.width // 2, self.height // 2))
+        self.screen.blit(surf, rect)
+
+    def draw_controls(self):
+        """Draw control hints at bottom."""
+        text = "SPACE=Pause  +/-=Speed  ESC=Quit"
+        surf = self.font_tiny.render(text, True, (150, 150, 150))
+        self.screen.blit(surf, (self.width // 2 - 200, self.height - 16))
+
+    def draw_round_progress(self, completed_count, total):
+        """Draw round progress dots at bottom."""
+        for i in range(total):
+            dot_x = self.width // 2 - (total * 15) + i * 30
+            if i < completed_count:
+                pygame.draw.circle(self.screen, (100, 255, 100),
+                                 (dot_x, self.height - 48), 6)
+            else:
+                pygame.draw.circle(self.screen, (80, 80, 80),
+                                 (dot_x, self.height - 48), 6)
+
+    def draw_round_title(self, title):
+        """Draw a round title overlay."""
+        surf = self.font_large.render(title, True, (255, 255, 100))
+        r = surf.get_rect(center=(self.width // 2, self.height // 3))
+        self.screen.blit(surf, r)
+
+    def draw_pause_overlay(self):
+        """Draw PAUSED overlay."""
+        surf = self.font_large.render("PAUSED", True, (255, 255, 100))
+        r = surf.get_rect(center=(self.width // 2, self.height // 2))
+        self.screen.blit(surf, r)
+
+    def draw_draft_phase(self, player, shop_items: list[dict], gold: int, 
+                         round_num: int, is_creep: bool, synergy_data: dict):
+        """Draw draft phase UI with shop items, bench, and board."""
+        self.screen.fill((20, 30, 40))
+
+        # Header
+        status = "CREEP" if is_creep else "PvP"
+        header = f"ROUND {round_num} - DRAFT [{status}]"
+        surf = self.font_large.render(header, True, (255, 255, 100))
+        r = surf.get_rect(center=(self.width // 2, 40))
+        self.screen.blit(surf, r)
+
+        # Gold display
+        gold_surf = self.font_small.render(f"Gold: {gold}", True, (255, 215, 0))
+        self.screen.blit(gold_surf, (self.width - 150, 8))
+
+        # Draw shop items (top section)
+        pygame.draw.rect(self.screen, (40, 60, 80), (10, 70, self.width - 20, 120), border_radius=8)
+        shop_title = self.font_small.render("SHOP (N=Next roll)", True, (200, 200, 200))
+        self.screen.blit(shop_title, (20, 80))
+
+        item_x = 20
+        for i, item in enumerate(shop_items[:10]):
+            x = item_x + i * 110
+            if x > self.width - 120:
+                break
+            # Item card
+            color = (60, 80, 100)
+            name = item.get("name", "?")
+            cost = item.get("cost", 1)
+
+            # Background
+            pygame.draw.rect(self.screen, color, (x, 100, 100, 85), border_radius=6)
+            pygame.draw.rect(self.screen, (100, 150, 200), (x, 100, 100, 85), width=1, border_radius=6)
+
+            # Name
+            name_surf = self.font_tiny.render(name, True, (255, 255, 255))
+            self.screen.blit(name_surf, (x + 5, 105))
+
+            # Cost
+            cost_surf = self.font_tiny.render(f"${cost}", True, (255, 215, 0))
+            self.screen.blit(cost_surf, (x + 5, 125))
+
+        # Draw bench (left section)
+        pygame.draw.rect(self.screen, (30, 50, 70), (10, 200, self.width // 3 - 20, 200), border_radius=8)
+        bench_title = self.font_small.render("BENCH (Click to place)", True, (200, 200, 200))
+        self.screen.blit(bench_title, (20, 210))
+
+        bench_y = 240
+        for i, unit_name in enumerate(player.reserve[:10]):
+            x = 20 + (i % 5) * ((self.width // 3 - 40) // 5)
+            y = bench_y + (i // 5) * 35
+            color = (80, 100, 120) if "★" not in unit_name else (120, 80, 160)
+            pygame.draw.rect(self.screen, color, (x, y, 90, 28), border_radius=4)
+            name_surf = self.font_tiny.render(unit_name, True, (255, 255, 255))
+            self.screen.blit(name_surf, (x + 5, y + 5))
+
+        # Draw board (right section)
+        pygame.draw.rect(self.screen, (40, 70, 40), (self.width // 3 + 10, 200, self.width // 3 - 20, 200), border_radius=8)
+        board_title = self.font_small.render("BOARD (Click to remove)", True, (200, 200, 200))
+        self.screen.blit(board_title, (self.width // 3 + 20, 210))
+
+        for i, unit in enumerate(player.board[:6]):
+            x = self.width // 3 + 20 + (i % 3) * ((self.width // 3 - 40) // 3)
+            y = 250 + (i // 3) * 40
+            color = (100, 160, 100) if unit.get("star", 1) == 1 else (160, 100, 160)
+            pygame.draw.rect(self.screen, color, (x, y, 90, 32), border_radius=4)
+            name_surf = self.font_tiny.render(unit.get("name", "?"), True, (255, 255, 255))
+            self.screen.blit(name_surf, (x + 5, y + 5))
+
+        # Synergy info
+        synergy_counts = player.get_synergy_count
+        syn_x = self.width // 3 * 2 + 10
+        for cls_name in ["warrior", "mage", "archer"]:
+            count = synergy_counts(cls_name)
+            if count > 0:
+                color = (100, 255, 100) if count >= 2 else (200, 200, 100)
+                syn_text = self.font_tiny.render(f"{cls_name}: {count}", True, color)
+                self.screen.blit(syn_text, (syn_x, 230 + list(["warrior", "mage", "archer"]).index(cls_name)) * 25)
+
+        # Controls hint
+        controls = "W=Buy(1) S=Sell D=Place F=Remove R=Roll"
+        ctrl_surf = self.font_tiny.render(controls, True, (150, 150, 150))
+        self.screen.blit(ctrl_surf, (self.width // 2 - 200, self.height - 40))
+
+    def _draw_interactive_draft(self, player, shop_items: list[dict], gold: int,
+                                 round_num: int, is_creep: bool, synergy_data: dict):
+        """Draw interactive draft phase with keyboard controls."""
+        self.screen.fill((20, 30, 40))
+
+        # Header
+        status = "CREEP" if is_creep else "PvP"
+        header = f"ROUND {round_num} - DRAFT [{status}]"
+        surf = self.font_large.render(header, True, (255, 255, 100))
+        r = surf.get_rect(center=(self.width // 2, 30))
+        self.screen.blit(surf, r)
+
+        # Gold display
+        gold_surf = self.font_small.render(f"Gold: {gold}", True, (255, 215, 0))
+        self.screen.blit(gold_surf, (self.width - 150, 8))
+
+        # ── SHOP section ────────────────────────────────────────────────
+        pygame.draw.rect(self.screen, (40, 60, 80), (10, 55, self.width - 20, 130), border_radius=8)
+        shop_title = self.font_small.render("SHOP — R=roll N=next", True, (200, 200, 200))
+        self.screen.blit(shop_title, (20, 65))
+
+        item_x = 20
+        for i, item in enumerate(shop_items[:10]):
+            x = item_x + i * 110
+            if x > self.width - 120:
+                break
+            color = (60, 80, 100)
+            name_key = item.get("name", "?")
+            # Показываем русское имя из units.json вместо английского ключа
+            if not name_key.startswith("ITEM:"):
+                name = self.all_units.get(name_key, {}).get("name", name_key)
+            else:
+                name = name_key
+            cost = item.get("cost", 1)
+
+            # Подсветка выбранного shop item
+            border_color = (255, 255, 100) if i == self.selected_shop_idx else (100, 150, 200)
+            border_width = 3 if i == self.selected_shop_idx else 1
+            pygame.draw.rect(self.screen, color, (x, 85, 100, 95), border_radius=6)
+            pygame.draw.rect(self.screen, border_color, (x, 85, 100, 95), width=border_width, border_radius=6)
+
+            name_surf = self.font_tiny.render(name, True, (255, 255, 255))
+            self.screen.blit(name_surf, (x + 5, 90))
+
+            cost_surf = self.font_tiny.render(f"${cost}", True, (255, 215, 0))
+            self.screen.blit(cost_surf, (x + 5, 110))
+
+        # ── BENCH section ───────────────────────────────────────────────
+        pygame.draw.rect(self.screen, (30, 50, 70), (10, 195, self.width // 3 - 20, 180), border_radius=8)
+        bench_title = self.font_small.render(f"BENCH ({len(player.reserve)}) — D=place", True, (200, 200, 200))
+        self.screen.blit(bench_title, (20, 205))
+
+        for i, unit_name in enumerate(player.reserve[:10]):
+            x = 20 + (i % 5) * ((self.width // 3 - 40) // 5)
+            y = 235 + (i // 5) * 32
+            # Переводим английский ключ на русское имя
+            base = unit_name.split("★")[0]
+            ru_name = self.all_units.get(base, {}).get("name", base)
+            stars = unit_name[len(base):] if unit_name.startswith(base) else ""
+            display_name = ru_name + stars
+            # Подсветка выбранного bench slot
+            border_color = (255, 255, 100) if i == self.selected_bench_idx else (200, 200, 200)
+            border_width = 3 if i == self.selected_bench_idx else 1
+            pygame.draw.rect(self.screen, color, (x, y, 85, 26), border_radius=4)
+            pygame.draw.rect(self.screen, border_color, (x, y, 85, 26), width=border_width, border_radius=4)
+            name_surf = self.font_tiny.render(display_name, True, (255, 255, 255))
+            self.screen.blit(name_surf, (x + 3, y + 4))
+
+        # ── BOARD section ───────────────────────────────────────────────
+        pygame.draw.rect(self.screen, (40, 70, 40), (self.width // 3 + 10, 195, self.width // 3 - 20, 180), border_radius=8)
+        board_title = self.font_small.render(f"BOARD ({len(player.board)}/6) — F=remove", True, (200, 200, 200))
+        self.screen.blit(board_title, (self.width // 3 + 20, 205))
+
+        for i, unit in enumerate(player.board[:6]):
+            x = self.width // 3 + 20 + (i % 3) * ((self.width // 3 - 40) // 3)
+            y = 240 + (i // 3) * 35
+            # Подсветка board slot (при наведении)
+            border_color = (255, 255, 100) if self.selected_bench_idx is None and self.selected_shop_idx is None else (200, 200, 200)
+            border_width = 2
+            pygame.draw.rect(self.screen, color, (x, y, 85, 30), border_radius=4)
+            pygame.draw.rect(self.screen, border_color, (x, y, 85, 30), width=border_width, border_radius=4)
+            # Переводим английский ключ на русское имя
+            unit_name = unit.get("name", "?")
+            base = unit_name.split("★")[0]
+            ru_name = self.all_units.get(base, {}).get("name", base)
+            stars = unit_name[len(base):] if unit_name.startswith(base) else ""
+            display_name = ru_name + stars
+            name_surf = self.font_tiny.render(display_name, True, (255, 255, 255))
+            self.screen.blit(name_surf, (x + 3, y + 4))
+
+        # ── Synergy info ────────────────────────────────────────────────
+        syn_x = self.width // 3 * 2 + 10
+        syn_title = self.font_small.render("SYNERGIES", True, (200, 200, 200))
+        self.screen.blit(syn_title, (syn_x, 205))
+        for idx, cls_name in enumerate(["warrior", "mage", "archer"]):
+            count = player.get_synergy_count(cls_name)
+            if count > 0:
+                color = (100, 255, 100) if count >= 2 else (200, 200, 100)
+                syn_text = self.font_tiny.render(f"{cls_name}: {count}", True, color)
+                self.screen.blit(syn_text, (syn_x, 225 + idx * 20))
+
+        # ── Controls hint ───────────────────────────────────────────────
+        controls = "W=Buy  S=Sell  D=Place  F=Remove  R=Roll  I=Item  A=Apply  Enter=Done  |  Клик: шоп/бенч/доска"
+        ctrl_surf = self.font_tiny.render(controls, True, (150, 150, 150))
+        self.screen.blit(ctrl_surf, (self.width // 2 - 310, self.height - 30))
+
+    def _draw_items_section(self, items: list[dict]):
+        """Draw inventory section with items."""
+        if not items:
+            return
+        
+        inv_x = self.width // 3 * 2 + 10
+        inv_y = 260
+        pygame.draw.rect(self.screen, (50, 40, 70), (inv_x - 10, inv_y - 5, self.width // 3 - 30, len(items) * 35 + 20), border_radius=8)
+        
+        inv_title = self.font_small.render("INVENTORY", True, (200, 150, 200))
+        self.screen.blit(inv_title, (inv_x, inv_y))
+        inv_y += 25
+        
+        for i, item in enumerate(items[:4]):
+            x = inv_x
+            y = inv_y + i * 35
+            color = (80, 60, 100)
+            pygame.draw.rect(self.screen, color, (x, y, 100, 28), border_radius=4)
+            
+            # Item icon (colored square based on type)
+            item_type = item.get("type", "accessory")
+            if item_type == "armor":
+                icon_color = (150, 150, 150)
+            elif item_type == "weapon":
+                icon_color = (200, 50, 50)
+            elif item_type == "legendary":
+                icon_color = (255, 215, 0)
+            else:
+                icon_color = (100, 150, 255)
+            
+            pygame.draw.rect(self.screen, icon_color, (x + 3, y + 3, 8, 22), border_radius=2)
+            
+            name_surf = self.font_tiny.render(item.get("name", "?"), True, (255, 255, 255))
+            self.screen.blit(name_surf, (x + 14, y + 4))
+
+    def _mixed_roll(self, shop, count=7, item_count=3):
+        """Смешанный ролл: юниты + предметы."""
+        unit_items = shop.roll(count=count)
+        try:
+            item_items = shop.roll_items(count=item_count)
+            # Добавляем префикс 'ITEM:' для предметов чтобы различать
+        except Exception:
+            item_items = []
+        
+        all_items = list(unit_items) + [{"name": f"ITEM:{i['name']}", "cost": i["cost"], "item_key": i.get("item_key", "")} for i in item_items]
+        return all_items
+
+    def _run_interactive_draft(self, round_num, is_creep, synergy_data, seed, existing_units=None):
+        """Run interactive draft phase. Returns (player_units_for_battle, gold_after) or None if user quits."""
+        from game.core.shop import Shop
+        from game.core.pool import Pool
+        from game.core.draft import DraftPhase
+        from game.core.player import Player
+        import json
+
+        project_root = Path(__file__).parent.parent.resolve()
+        with open(project_root / "data" / "units.json", "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        # Load items
+        with open(project_root / "data" / "items.json", "r", encoding="utf-8") as f:
+            items_data = json.load(f)
+
+        all_units = data["units"]
+        unit_costs = {name: info["cost"] for name, info in all_units.items()}
+
+        rng = random.Random(seed + round_num * 100)
+        pool = Pool(unit_costs)
+        shop = Shop(pool, unit_costs=unit_costs, item_data=items_data.get("items", {}), rng=rng)
+        draft_phase = DraftPhase(shop, all_units)
+
+        self.all_units = all_units  # Для отображения имён на русском в магазине
+
+        gold = 10 if existing_units is None else existing_units.get("gold", 10)
+        player = Player(gold=gold)
+
+        if existing_units is None:
+            # First round — buy starting warrior
+            try:
+                shop.buy(player, "warrior_freshman", cost=1)
+                player.gold -= 1
+            except Exception:
+                pass
+        else:
+            # Restore previously bought units to reserve/board
+            units = existing_units.get("units", [])
+            for u in units:
+                name = u.get("name", "warrior_freshman")
+                star = u.get("star", 1)
+                display_name = name if "★" in name else name + ("★" * (star - 1) if star > 1 else "")
+                player.reserve.append(display_name)
+                if len(player.board) < 6:
+                    player.board.append({"name": display_name, "star": star, **u.get("stats", {})})
+
+        # Mixed shop: units + items
+        shop_items = self._mixed_roll(shop, count=7, item_count=3)
+
+        while True:
+            done_draft = False
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False
+                    return None
+
+                elif event.type == pygame.KEYDOWN:
+                    key = event.key
+
+                    if key == pygame.K_RETURN:
+                        # Player done with draft — exit both the event loop and while True
+                        done_draft = True
+                        break
+
+                    elif key == pygame.K_r:
+                        if player.gold >= 1:
+                            player.gold -= 1
+                            try:
+                                shop_items = shop.roll(count=10)
+                            except Exception:
+                                pass
+
+                    elif key == pygame.K_n:
+                        try:
+                            shop_items = shop.roll(count=10)
+                        except Exception:
+                            pass
+
+                    elif key == pygame.K_w:
+                        try:
+                            draft_phase.buy_unit(player, "warrior_freshman")
+                            player.gold -= 1
+                        except Exception:
+                            pass
+
+                    elif key == pygame.K_s:
+                        if player.reserve:
+                            try:
+                                draft_phase.sell_unit(player, len(player.reserve) - 1)
+                                player.gold += 1
+                            except Exception:
+                                pass
+
+                    elif key == pygame.K_d:
+                        if player.reserve and len(player.board) < 6:
+                            try:
+                                unit = draft_phase.place_on_board(player, len(player.reserve) - 1)
+                                # Set base stats for item bonus calculation
+                                name_base = unit["name"].split("★")[0]
+                                if name_base in all_units:
+                                    ud = all_units[name_base]
+                                    shop.set_base_stats(player, len(player.board) - 1, 
+                                                       int(ud["hp"] * (1.5 if unit.get("star", 1) == 2 else 2.0 if unit.get("star", 1) == 3 else 1)),
+                                                       int(ud["damage"] * (1.5 if unit.get("star", 1) == 2 else 2.0 if unit.get("star", 1) == 3 else 1)),
+                                                       ud["attack_speed"])
+                            except Exception:
+                                pass
+
+                    elif key == pygame.K_f:
+                        if player.board:
+                            try:
+                                draft_phase.remove_from_board(player, len(player.board) - 1)
+                            except Exception:
+                                pass
+
+                    elif key == pygame.K_i:
+                        # Buy cheapest item (cost ~3)
+                        try:
+                            available_items = shop.get_available_items()
+                            if available_items:
+                                # Find cheapest item
+                                cheapest = min(available_items, key=lambda k: items_data["items"][k]["cost"])
+                                item_info = items_data["items"][cheapest]
+                                if player.gold >= item_info["cost"]:
+                                    shop.buy_item(player, cheapest)
+                        except Exception:
+                            pass
+
+                    elif key == pygame.K_a:
+                        # Apply last item to last board unit
+                        if player.items and player.board:
+                            try:
+                                shop.apply_item_to_unit(player, len(player.items) - 1, len(player.board) - 1)
+                            except Exception:
+                                pass
+
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    mx, my = event.pos
+                    # ── SHOP items ──
+                    shop_x0, shop_y0, shop_w, shop_h = 20, 85, 100, 95
+                    shop_step = 110
+                    for i, item in enumerate(shop_items[:10]):
+                        sx = shop_x0 + i * shop_step
+                        if sx > self.width - 120:
+                            break
+                        rect = pygame.Rect(sx, shop_y0, shop_w, shop_h)
+                        if rect.collidepoint(mx, my):
+                            name = item.get("name", "")
+                            if name.startswith("ITEM:"):
+                                # Предмет
+                                item_key = item.get("item_key", "")
+                                try:
+                                    shop.buy_item(player, item_key)
+                                except Exception:
+                                    pass
+                            else:
+                                # Юнит
+                                try:
+                                    draft_phase.buy_unit(player, name)
+                                except Exception:
+                                    pass
+                            self.selected_shop_idx = i
+                            self.selected_bench_idx = None
+                            break
+                    else:
+                        # ── BENCH ──
+                        bench_w = 85
+                        bench_h = 26
+                        bench_cols = 5
+                        bench_x0 = 20
+                        bench_y0 = 235
+                        cell_w = (self.width // 3 - 40) // bench_cols
+                        for i in range(len(player.reserve)):
+                            bx = bench_x0 + (i % bench_cols) * cell_w
+                            by = bench_y0 + (i // bench_cols) * bench_h
+                            rect = pygame.Rect(bx, by, bench_w, bench_h)
+                            if rect.collidepoint(mx, my):
+                                if len(player.board) < 6:
+                                    try:
+                                        draft_phase.place_on_board(player, i)
+                                        name_base = player.board[-1]["name"].split("★")[0]
+                                        if name_base in all_units:
+                                            ud = all_units[name_base]
+                                            unit = player.board[-1]
+                                            shop.set_base_stats(player, len(player.board) - 1,
+                                                                int(ud["hp"] * (1.5 if unit.get("star", 1) == 2 else 2.0 if unit.get("star", 1) == 3 else 1)),
+                                                                int(ud["damage"] * (1.5 if unit.get("star", 1) == 2 else 2.0 if unit.get("star", 1) == 3 else 1)),
+                                                                ud["attack_speed"])
+                                    except Exception:
+                                        pass
+                                self.selected_bench_idx = i
+                                self.selected_shop_idx = None
+                                break
+                        else:
+                            # ── BOARD ──
+                            board_w = 85
+                            board_h = 30
+                            board_cols = 3
+                            board_x0 = self.width // 3 + 20
+                            board_y0 = 240
+                            cell_w2 = (self.width // 3 - 40) // board_cols
+                            for i in range(len(player.board)):
+                                cx = board_x0 + (i % board_cols) * cell_w2
+                                cy = board_y0 + (i // board_cols) * 35
+                                rect = pygame.Rect(cx, cy, board_w, board_h)
+                                if rect.collidepoint(mx, my):
+                                    try:
+                                        draft_phase.remove_from_board(player, i)
+                                    except Exception:
+                                        pass
+                                    self.selected_bench_idx = None
+                                    self.selected_shop_idx = None
+                                    break
+
+            # Check if player pressed Enter to exit draft
+            if done_draft:
+                break
+
+            # Draw current state
+            self._draw_interactive_draft(
+                player=player,
+                shop_items=shop_items,
+                gold=player.gold,
+                round_num=round_num,
+                is_creep=is_creep,
+                synergy_data=synergy_data,
+            )
+
+            pygame.display.flip()
+            self.clock.tick(30)
+
+        # Convert board to battle format (with item bonuses)
+        player_units = []
+        for unit in player.board[:6]:
+            name_base = unit["name"].split("★")[0]
+            if name_base in all_units:
+                ud = all_units[name_base]
+                star = unit.get("star", 1)
+                hp_mult = 1.5 if star == 2 else 2.0 if star == 3 else 1.0
+                dmg_mult = 1.5 if star == 2 else 2.0 if star == 3 else 1.0
+                
+                # Start with base stats + star bonuses
+                unit_data = {
+                    "name": name_base,
+                    "hp": int(ud["hp"] * hp_mult),
+                    "damage": int(ud["damage"] * dmg_mult),
+                    "attack_speed": ud["attack_speed"],
+                    "range_": ud["range"],
+                    "class": ud["class"],
+                }
+                
+                # Add active ability if unit has one
+                if ud.get("active"):
+                    unit_data["active"] = dict(ud["active"])
+                
+                # Check if this unit has item bonuses stored
+                if "item_bonuses" in unit:
+                    unit_data["item_bonuses"] = unit["item_bonuses"]
+                
+                player_units.append(unit_data)
+
+        if not player_units:
+            player_units = [
+                {"name": "warrior_freshman", "hp": 500, "damage": 40,
+                 "attack_speed": 1.2, "range_": 1, "class": "warrior"},
+                {"name": "mage_acolyte", "hp": 300, "damage": 65,
+                 "attack_speed": 1.0, "range_": 4, "class": "mage"},
+            ]
+
+        return player_units, player.gold
+
+    def _get_unit_positions(self, player_units, enemy_units):
+        """Get (x,y) positions for each unit on screen."""
+        cx = self.width // 2
+        cy = 100
+        unit_w = 150
+        positions = {}
+
+        for i in range(len(player_units)):
+            x = 30 + i * (unit_w + 10)
+            y = cy + i * 70
+            cx_pos = x + 70  # center of unit rect
+            cy_pos = y + 25
+            positions[player_units[i]] = (cx_pos, cy_pos)
+
+        for i in range(len(enemy_units)):
+            x = cx + 50 + i * (unit_w + 10)
+            y = cy + i * 70
+            cx_pos = x + 70
+            cy_pos = y + 25
+            positions[enemy_units[i]] = (cx_pos, cy_pos)
+
+        return positions
+
+    def _draw_battle_scene(self, sim, effects, frame_idx=0):
+        """Draw the current state of a battle with visual effects.
+        
+        Args:
+            sim: BattleSimulator instance
+            effects: dict with visual effect lists (populated during drawing)
+            frame_idx: index into sim._tick_history (0 = initial state)
+        """
+        PLAYER_COLOR = (40, 80, 160)
+        ENEMY_COLOR = (160, 50, 50)
+
+        # Restore state from snapshot at the given frame index
+        if frame_idx > 0 and frame_idx <= len(sim._tick_history):
+            sim.restore_from_snapshot(sim._tick_history[frame_idx - 1])
+        
+        player_units = [u for u in sim.teams.get("player", [])]
+        enemy_units = [u for u in sim.teams.get("enemy", [])]
+
+        # Get positions for each unit
+        positions = self._get_unit_positions(player_units, enemy_units)
+
+        # Draw VS separator
+        cx = self.width // 2
+        cy = 100
+        self.draw_vs(cx, cy)
+
+        # Draw attack lines first (behind units)
+        for line in list(effects.get("lines", [])):
+            if line.update():
+                line.draw(self.screen)
+            else:
+                effects["lines"].remove(line)
+
+        # Draw each unit
+        for unit in player_units:
+            if not unit.alive:
+                continue  # dead units are drawn as faded
+            x, y = positions[unit]
+            rect_x = x - 70
+            rect_y = y - 25
+            ability_name = unit.active_ability.get("name", "") if unit.active_ability else None
+            ability_cooldown = unit.ability_cooldown
+            ability_cooldown_max = unit.active_ability.get("cooldown", 0) if unit.active_ability else 0
+            self.draw_unit(
+                {"name": unit.name, "hp": unit.hp, "_base_hp": unit.max_hp},
+                rect_x, rect_y, PLAYER_COLOR,
+                ability_name=ability_name,
+                ability_cooldown=ability_cooldown,
+                ability_cooldown_max=ability_cooldown_max,
+            )
+
+        for unit in enemy_units:
+            if not unit.alive:
+                continue
+            x, y = positions[unit]
+            rect_x = x - 70
+            rect_y = y - 25
+            ability_name = unit.active_ability.get("name", "") if unit.active_ability else None
+            ability_cooldown = unit.ability_cooldown
+            ability_cooldown_max = unit.active_ability.get("cooldown", 0) if unit.active_ability else 0
+            self.draw_unit(
+                {"name": unit.name, "hp": unit.hp, "_base_hp": unit.max_hp},
+                rect_x, rect_y, ENEMY_COLOR,
+                ability_name=ability_name,
+                ability_cooldown=ability_cooldown,
+                ability_cooldown_max=ability_cooldown_max,
+            )
+
+        # Draw dead units (faded)
+        for unit in player_units:
+            if not unit.alive:
+                x,y = positions[unit]
+                rect_x = x - 70
+                rect_y = y - 25
+                self.screen.set_alpha(128)
+                self.draw_unit(
+                    {"name": unit.name, "hp": 0, "_base_hp": unit.max_hp},
+                    rect_x, rect_y, (60, 60, 60)
+                )
+                self.screen.set_alpha(None)
+
+        for unit in enemy_units:
+            if not unit.alive:
+                x, y = positions[unit]
+                rect_x = x - 70
+                rect_y = y - 25
+                self.screen.set_alpha(128)
+                self.draw_unit(
+                    {"name": unit.name, "hp": 0, "_base_hp": unit.max_hp},
+                    rect_x, rect_y, (60, 60, 60)
+                )
+                self.screen.set_alpha(None)
+
+        # Draw damage numbers on top of everything
+        for dn in list(effects.get("damage_numbers", [])):
+            if dn.update():
+                dn.draw(self.screen, self.font_tiny)
+            else:
+                effects["damage_numbers"].remove(dn)
+
+        # Draw death effects
+        for de in list(effects.get("death_effects", [])):
+            if de.update():
+                de.draw(self.screen)
+            else:
+                effects["death_effects"].remove(de)
+
+        # Draw ability effects (expanding rings + particles)
+        for ae in list(effects.get("ability_effects", [])):
+            if ae.update():
+                ae.draw(self.screen)
+            else:
+                effects["ability_effects"].remove(ae)
+
+        # Draw hit impact particles
+        for hp in list(effects.get("hit_particles", [])):
+            if hp.update():
+                hp.draw(self.screen)
+            else:
+                effects["hit_particles"].remove(hp)
+
+        # Draw critical hit flash + enlarged number
+        for ce in list(effects.get("critical_effects", [])):
+            if ce.update():
+                ce.draw(self.screen, self.font_tiny)
+            else:
+                effects["critical_effects"].remove(ce)
+
+    def wait_for_input(self):
+        """Ждёт нажатия клавиши или клика мыши перед переходом к следующей фазе."""
+        pygame.event.get()  # очистить очередь
+        while self.running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False
+                    return False
+                elif event.type == pygame.KEYDOWN or event.type == pygame.MOUSEBUTTONDOWN:
+                    return True
+            self.clock.tick(30)
+        return False
+
+    def run(self, game_instance):
+        """Run UI with real-time battle animation.
+
+        Each round plays out tick-by-tick from its stored simulator.
+        Press SPACE to pause/resume, +/- to change speed.
+        """
+        self.init()
+        self.running = True
+
+        PLAYER_COLOR = (40, 80, 160)
+        ENEMY_COLOR = (160, 50, 50)
+        BG_COLOR = (20, 20, 30)
+
+        history = game_instance.history
+        if not history:
+            print("No rounds to display.")
+            pygame.quit()
+            return
+
+        # State machine for animation — NO WAITING between phases!
+        phase = "intro"  # intro -> draft -> round_title -> battle -> round_end -> done
+        current_round_idx = 0
+        tick_count = 0
+        paused = False
+
+        while self.running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False
+                
+                elif event.type == pygame.KEYDOWN:
+                    # Handle global hotkeys
+                    if event.key == pygame.K_ESCAPE:
+                        self.running = False
+                    elif event.key == pygame.K_SPACE:
+                        paused = not paused
+                    elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, getattr(pygame, 'K_KP_PLUS', None)):
+                        self.ticks_per_frame = min(20, self.ticks_per_frame + 1)
+                        self.speed_display_timer = 60  # показывать 2 секунды
+                    elif event.key in (pygame.K_MINUS, getattr(pygame, 'K_KP_MINUS', None)):
+                        self.ticks_per_frame = max(1, self.ticks_per_frame - 1)
+                        self.speed_display_timer = 60  # показывать 2 секунды
+            
+            # Phase transitions — use time.sleep() for visible pauses
+            if phase == "intro":
+                self.screen.fill(BG_COLOR)
+                surf = self.font_large.render("AUTOBATTLER MVP", True, (255, 255, 100))
+                r = surf.get_rect(center=(self.width // 2, self.height // 3))
+                self.screen.blit(surf, r)
+                sub = self.font_small.render("Нажмите любую клавишу...", True, (200, 200, 200))
+                r2 = sub.get_rect(center=(self.width // 2, self.height // 2 + 40))
+                self.screen.blit(sub, r2)
+                pygame.display.flip()
+                
+                # Wait for any keypress to start (user must click window first)
+                started = False
+                while not started and self.running:
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
+                            self.running = False
+                            break
+                        elif event.type == pygame.KEYDOWN:
+                            started = True
+                    
+                    # If no key pressed yet, just keep the screen visible
+                    if not started:
+                        time.sleep(0.05)
+                
+                phase = "draft"
+                current_round_idx = 0
+                tick_count = 0
+                paused = False
+            
+            elif phase == "draft":
+                # Auto-skip ALL drafts — use pre-built teams from game_instance
+                state = history[current_round_idx]
+                
+                self.screen.fill((20, 30, 40))
+                title = f"ROUND {state.round_number}"
+                if state.is_creep:
+                    title += " (CREEP)"
+                else:
+                    title += " (PvP)"
+                self.draw_round_title(title)
+                sub = self.font_small.render("Нажмите любую клавишу или кликните мышью...", True, (200, 200, 200))
+                r = sub.get_rect(center=(self.width // 2, self.height // 2 + 40))
+                self.screen.blit(sub, r)
+                pygame.display.flip()
+                
+                if not self.wait_for_input():
+                    return
+                
+                phase = "round_title"
+            
+            elif phase == "round_title":
+                # Show round title briefly then move to battle immediately
+                state = history[current_round_idx]
+                self.screen.fill(BG_COLOR)
+                is_creep = state.is_creep
+                title = f"ROUND {state.round_number} - CREEP BATTLE" if is_creep else f"ROUND {state.round_number} - PvP"
+                self.draw_round_title(title)
+                sub = self.font_small.render("Нажмите любую клавишу или кликните мышью...", True, (200, 200, 200))
+                r = sub.get_rect(center=(self.width // 2, self.height // 2 + 40))
+                self.screen.blit(sub, r)
+                pygame.display.flip()
+
+                if not self.wait_for_input():
+                    return
+                
+                # Move to battle immediately — no waiting!
+                phase = "battle"
+                tick_count = 0
+
+            elif phase == "battle":
+                state = history[current_round_idx]
+                sim = game_instance.all_sims.get(state.round_number)
+
+                if not sim:
+                    # No simulator for this round - skip
+                    current_round_idx += 1
+                    if current_round_idx >= len(history):
+                        phase = "done"
+                    else:
+                        phase = "round_title"
+                    continue
+
+                if paused:
+                    self.clock.tick(30)
+                    continue
+
+                total_ticks_final = state.total_ticks if hasattr(state, 'total_ticks') else sim.get_total_ticks()
+                
+                # Accumulate effects across frames (don't reset each frame)
+                # This allows attack lines and damage numbers to animate smoothly
+                if tick_count == 0:  # Initialize on first frame only
+                    effects = {
+                        "damage_numbers": [],
+                        "death_effects": [],
+                        "lines": [],
+                        "ability_effects": [],
+                        "hit_particles": [],
+                        "critical_effects": [],
+                    }
+                
+                # Restore state from snapshot at the current frame
+                self.screen.fill(BG_COLOR)
+                self._draw_battle_scene(sim, effects, tick_count)
+
+                # Generate attack lines from events that happened up to this tick
+                positions = self._get_unit_positions(
+                    [u for u in sim.teams.get("player", [])],
+                    [u for u in sim.teams.get("enemy", [])]
+                )
+                
+                attack_events = sim.get_attack_events(up_to_tick=tick_count)
+                prev_events = sim.get_attack_events(up_to_tick=tick_count - 1) if tick_count > 0 else []
+                
+                # Only create lines for NEW events since last frame
+                new_events = [e for e in attack_events if e not in prev_events]
+                for evt in new_events:
+                    attacker_team = evt["attacker_team"]
+                    attacker_unit = None
+                    for u in sim.teams.get(attacker_team, []):
+                        if u.unit_id == evt["attacker_id"]:
+                            attacker_unit = u
+                            break
+                    
+                    if not attacker_unit:
+                        continue
+                    
+                    enemy_team = "enemy" if attacker_team == "player" else "player"
+                    for target_id in evt["targets"]:
+                        target_unit = None
+                        for u in sim.teams.get(enemy_team, []):
+                            if u.unit_id == target_id:
+                                target_unit = u
+                                break
+                        
+                        if not target_unit:
+                            continue
+                        
+                        attacker_pos = positions.get(attacker_unit)
+                        target_pos = positions.get(target_unit)
+                        
+                        if attacker_pos and target_pos:
+                            effects["lines"].append(
+                                AttackLine(attacker_pos[0], attacker_pos[1],
+                                          target_pos[0], target_pos[1])
+                            )
+                
+                # Generate damage numbers from log events (new since last tick)
+                for event in sim.log:
+                    if event.get("tick") == tick_count and event.get("type") in ("hit", "kill"):
+                        target_id = event.get("target_id")
+                        # Определяем команду атакующего из самого события (evt может не существовать)
+                        attacker_team = None
+                        for u in sim.teams.get("player", []) + sim.teams.get("enemy", []):
+                            if u.unit_id == event.get("attacker_id"):
+                                attacker_team = u.team
+                                break
+                        enemy_team = "enemy" if attacker_team == "player" else "player"
+                        target_unit = None
+                        for u in sim.teams.get(enemy_team, []):
+                            if u.unit_id == target_id:
+                                target_unit = u
+                                break
+                        
+                        target_pos = positions.get(target_unit) if target_unit else None
+                        if target_pos:
+                            dmg_color = (255, 100, 50) if event.get("type") != "kill" else (255, 50, 50)
+                            effects["damage_numbers"].append(
+                                DamageNumber(target_pos[0], target_pos[1] - 30,
+                                            event["damage"], dmg_color)
+                            )
+                            # Hit impact particles
+                            effects["hit_particles"].append(
+                                HitParticles(target_pos[0], target_pos[1],
+                                            is_critical=event.get("is_critical", False))
+                            )
+                            # Critical hit flash + enlarged number
+                            if event.get("is_critical", False):
+                                effects["critical_effects"].append(
+                                    CriticalEffect(target_pos[0], target_pos[1],
+                                                  event["damage"])
+                                )
+                
+                # Generate death effects from kill events at this tick
+                for event in sim.log:
+                    if event.get("tick") == tick_count and event.get("type") == "kill":
+                        target_id = event.get("target_id")
+                        # Определяем команду атакующего из самого события (evt может не существовать)
+                        attacker_team = None
+                        for u in sim.teams.get("player", []) + sim.teams.get("enemy", []):
+                            if u.unit_id == event.get("attacker_id"):
+                                attacker_team = u.team
+                                break
+                        enemy_team = "enemy" if attacker_team == "player" else "player"
+                        for u in sim.teams.get(enemy_team, []):
+                            if u.unit_id == target_id and not u.alive:
+                                target_pos = positions.get(u)
+                                if target_pos:
+                                    effects["death_effects"].append(
+                                        DeathEffect(target_pos[0], target_pos[1])
+                                    )
+                
+                # Generate ability visual effects from ability events at this tick
+                for event in sim.log:
+                    if event.get("tick") == tick_count and ("ability" in event.get("type", "") or "ability_name" in event):
+                        caster_id = event.get("caster_id")
+                        caster_unit = None
+                        for team_name, units in sim.teams.items():
+                            for u in units:
+                                if u.unit_id == caster_id and u.alive:
+                                    caster_unit = u
+                                    break
+                            if caster_unit:
+                                break
+                        
+                        if caster_unit:
+                            caster_pos = positions.get(caster_unit)
+                            if caster_pos:
+                                ability_name = event.get("ability_name", "Ability")
+                                # Determine effect type from ability name or data
+                                effect_type = "aoe_damage"  # default
+                                if "Огненный" in ability_name or "Fire" in ability_name:
+                                    effect_type = "aoe_damage"
+                                elif "Метеор" in ability_name:
+                                    effect_type = "aoe_damage"
+                                elif "Выстрел" in ability_name:
+                                    effect_type = "single_target_critical"
+                                elif "Щит" in ability_name:
+                                    effect_type = "buff_allies"
+                                elif "Волна" in ability_name or "slow" in str(event.get("type", "")).lower():
+                                    effect_type = "aoe_damage_slow"
+                                
+                                effects["ability_effects"].append(
+                                    AbilityEffect(caster_pos[0], caster_pos[1],
+                                                 ability_name, effect_type)
+                                )
+
+                # Header for this round
+                self.draw_header(state.round_number, state.total_gold_after, state.is_creep)
+
+                # Battle log (last events)
+                if sim.log:
+                    self.draw_battle_log(sim.log)
+
+                # Tick counter
+                tick_surf = self.font_tiny.render(
+                    f"Tick: {tick_count}/{total_ticks_final}", True, (150, 150, 255))
+                self.screen.blit(tick_surf, (self.width // 2 - 40, 380))
+
+                # Speed indicator badge
+                if self.speed_display_timer > 0:
+                    self.speed_display_timer -= 1
+                    alpha = min(self.speed_display_timer / 30, (60 - self.speed_display_timer) / 30)
+                    if alpha > 0:
+                        speed_level = self.ticks_per_frame
+                        label = "x1" if speed_level <= 1 else f"x{speed_level}"
+                        badge_text = f"Speed: {label}"
+                        badge_surf = self.font_tiny.render(badge_text, True, (255, 255, 100))
+                        badge_rect = badge_surf.get_rect(center=(self.width // 2 - 40, 398))
+                        pygame.draw.rect(self.screen, (40, 40, 60),
+                                        (badge_rect.x - 4, badge_rect.y - 2, badge_rect.w + 8, badge_rect.h + 4),
+                                        border_radius=4)
+                        pygame.draw.rect(self.screen, (150, 150, 100),
+                                        (badge_rect.x - 4, badge_rect.y - 2, badge_rect.w + 8, badge_rect.h + 4),
+                                        width=1, border_radius=4)
+                        self.screen.blit(badge_surf, badge_rect)
+
+                # Round progress dots
+                completed = current_round_idx if tick_count > 0 else -1
+                self.draw_round_progress(completed, len(history))
+
+                tick_count += self.ticks_per_frame
+
+                # Check if round is over (show final frame before ending)
+                if tick_count >= total_ticks_final:
+                    phase = "round_end"
+
+            elif phase == "round_end":
+                # Show round result briefly then move on
+                state = history[current_round_idx]
+                sim = game_instance.all_sims.get(state.round_number)
+                self.screen.fill(BG_COLOR)
+                # Restore final state from last snapshot
+                if sim and sim._tick_history:
+                    sim.restore_from_snapshot(sim._tick_history[-1])
+                self._draw_battle_scene(
+                    sim,
+                    {"damage_numbers": [], "death_effects": [], "lines": []}
+                )
+
+                winner = state.battle_result["winner"] if state.battle_result else "?"
+                ticks = state.battle_result.get("ticks", "?") if state.battle_result else "?"
+                is_creep = state.is_creep
+
+                result_text = f"ROUND {state.round_number} COMPLETE"
+                self.draw_round_title(result_text)
+
+                winner_surf = self.font_small.render(
+                    f"{winner.upper()} wins ({ticks} ticks)", True, (255, 200, 100))
+                r = winner_surf.get_rect(center=(self.width // 2, self.height // 2 + 40))
+                self.screen.blit(winner_surf, r)
+
+                # Gold earned
+                gold_text = f"+{state.gold_earned} gold (+{state.interest_earned}% interest)"
+                gold_surf = self.font_tiny.render(gold_text, True, (150, 255, 150))
+                r = gold_surf.get_rect(center=(self.width // 2, self.height // 2 + 70))
+                self.screen.blit(gold_surf, r)
+
+                sub = self.font_small.render("Нажмите любую клавишу или кликните мышью...", True, (200, 200, 200))
+                r = sub.get_rect(center=(self.width // 2, self.height // 2 + 40))
+                self.screen.blit(sub, r)
+                pygame.display.flip()
+
+                if not self.wait_for_input():
+                    return
+                
+                # Move to next phase immediately — no waiting!
+                current_round_idx += 1
+                tick_count = 0
+                if current_round_idx >= len(history):
+                    phase = "done"
+                else:
+                    phase = "draft"
+
+            elif phase == "done":
+                # Show final match result
+                self.screen.fill(BG_COLOR)
+                self.draw_result(game_instance.winner or "?", "?")
+
+                summary_surf = self.font_small.render(
+                    f"You won {sum(1 for s in history if s.battle_result and s.battle_result['winner'] == 'player')} rounds",
+                    True, (200, 200, 200))
+                r = summary_surf.get_rect(center=(self.width // 2, self.height // 2 + 50))
+                self.screen.blit(summary_surf, r)
+
+                restart_surf = self.font_tiny.render(
+                    "Press ESC to quit", True, (150, 150, 150))
+                r = restart_surf.get_rect(center=(self.width // 2, self.height - 40))
+                self.screen.blit(restart_surf, r)
+
+                pygame.display.flip()
+
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        self.running = False
+                    elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                        self.running = False
+
+            else:
+                phase = "done"
+
+            # Draw controls on every frame (except intro)
+            if phase != "intro":
+                self.draw_controls()
+
+            pygame.display.flip()
+            self.clock.tick(60)
+
+        pygame.quit()
+
+    def run_interactive_match(self, seed=42, enemy_bot="balanced"):
+        """Run a fully interactive match with draft phases.
+        
+        For PvP rounds (5+), player can buy/sell/place/remove units from shop.
+        For creep rounds (1-4), auto-fills with default units.
+        
+        Keys during draft: W=Buy(1g) S=Sell-last D=Place F=Remove R=Roll N=Next Enter=Done
+        During battle: SPACE=Pause +/-=Speed ESC=Quit
+        """
+        from game.core.round import Game, load_game_data
+        from game.core.shop import Shop
+        from game.core.pool import Pool
+        from game.core.draft import DraftPhase
+        from game.core.player import Player
+        from game.core.bots import create_bot
+        from game.core.economy import round_economy, calculate_interest
+        from game.core.synergies import calculate_synergy_bonuses
+        from game.battle.engine import BattleSimulator
+        
+        self.init()
+        self.running = True
+        
+        project_root = Path(__file__).parent.parent.resolve()
+        data = load_game_data(project_root / "data" / "units.json")
+        all_units = data["units"]
+        unit_costs = {name: info["cost"] for name, info in all_units.items()}
+        
+        BG_COLOR = (20, 20, 30)
+        PLAYER_COLOR = (40, 80, 160)
+        ENEMY_COLOR = (160, 50, 50)
+        
+        gold = 10
+        history = []  # list of round result dicts
+        all_sims = {}  # round_num -> BattleSimulator
+        # Хранилище купленных пользователем юнитов между PvP-раундами (не сбрасывается на волнах крипов)
+        stored_player_units = None
+        
+        for round_num in range(1, 9):
+            # Раунды 1-3 — крипы, потом каждый третий (6, 9, ...) — крип, остальные — PvP
+            is_creep = round_num <= 3 or round_num % 3 == 0
+            
+            if is_creep:
+                # Auto-fill creep round (with abilities from units.json)
+                enemy_units = [
+                    dict(all_units["warrior_freshman"]),
+                    dict(all_units["archer_scout"]),
+                ]
+                player_units = [
+                    dict(all_units["warrior_freshman"]),
+                    dict(all_units["mage_acolyte"]),
+                ]
+            else:
+                # Interactive draft for player — carry over units from previous PvP round
+                existing = {"units": stored_player_units, "gold": gold} if stored_player_units else None
+                result = self._run_interactive_draft(
+                    round_num=round_num,
+                    is_creep=False,
+                    synergy_data=data["synergies"],
+                    seed=seed,
+                    existing_units=existing,
+                )
+                if result is None:
+                    return  # user quit
+                player_units, gold = result
+                stored_player_units = player_units  # Сохраняем купленные юниты для следующего PvP-раунда
+                
+                # Bot drafts enemy units via shop — bot has its own economy (independent of player)
+                bot_gold = 20  # bot economy — enough for a full board
+                bot = create_bot(preset=enemy_bot, seed=seed + round_num)
+                rng = random.Random(seed + round_num * 100)
+                pool = Pool(unit_costs)
+                shop = Shop(pool, unit_costs=unit_costs, rng=rng)
+                draft_phase = DraftPhase(shop, all_units)
+                enemy_player = Player(gold=bot_gold)
+                
+                # Bot decides what to buy with its own gold
+                draft_decision = bot.decide_draft(
+                    available_units=all_units, gold=bot_gold, current_team=[], synergy_data={}
+                )
+                
+                purchased = []
+                for unit_info in draft_decision:
+                    name = unit_info["name"]
+                    cost = unit_info.get("cost", 1)
+                    if enemy_player.gold >= cost:
+                        try:
+                            merged_name = draft_phase.buy_unit(enemy_player, name)
+                            purchased.append(merged_name)
+                            enemy_player.gold -= cost
+                        except Exception:
+                            pass
+                
+                # Convert to battle format — use actually purchased units
+                enemy_units = []
+                for pu in purchased[:6]:
+                    name = pu.split("★")[0]  # base name without star
+                    if name in all_units:
+                        ud = all_units[name]
+                        star = 1
+                        if "★" in pu:
+                            star = int(pu.split("★")[1][1:])
+                        hp_mult = 1.5 if star == 2 else 2.0 if star == 3 else 1.0
+                        dmg_mult = 1.5 if star == 2 else 2.0 if star == 3 else 1.0
+                        eu = {
+                            "name": name,
+                            "hp": int(ud["hp"] * hp_mult),
+                            "damage": int(ud["damage"] * dmg_mult),
+                            "attack_speed": ud["attack_speed"],
+                            "range_": ud["range"],
+                            "class": ud["class"],
+                        }
+                        if ud.get("active"):
+                            eu["active"] = dict(ud["active"])
+                        enemy_units.append(eu)
+                
+                if not enemy_units:
+                    enemy_units = [
+                        {"name": "warrior_freshman", "hp": 500, "damage": 40, "attack_speed": 1.2, "range_": 1, "class": "warrior"},
+                        {"name": "mage_acolyte", "hp": 300, "damage": 65, "attack_speed": 1.0, "range_": 4, "class": "mage"},
+                    ]
+            
+            # Run battle simulation
+            sim = BattleSimulator(seed=seed + round_num)
+            sim.add_team("player", player_units)
+            sim.add_team("enemy", enemy_units)
+            battle_result = sim.run(max_ticks=600)
+            total_ticks = sim.get_total_ticks()
+            
+            # Economy
+            pvp_win = not is_creep and battle_result["winner"] == "player"
+            creep_win = is_creep and battle_result["winner"] == "player"
+            econ = round_economy(gold=gold, pvp_win=pvp_win, creep_win=creep_win)
+            gold = econ["gold_after"]
+            
+            state = {
+                "round_number": round_num,
+                "is_creep": is_creep,
+                "gold_earned": econ["income"],
+                "interest_earned": econ["interest"],
+                "total_gold_after": gold,
+                "battle_result": battle_result,
+                "total_ticks": total_ticks,
+            }
+            history.append(state)
+            all_sims[round_num] = sim
+            
+            # ── Battle animation phase (auto-start, no wait screen) ────────────
+            try:
+                result = self._animate_battle(sim, state, all_sims, BG_COLOR)
+                if not result:
+                    return  # user quit
+            except Exception as e:
+                print(f"ERROR in round {state['round_number']}: {e}")
+                import traceback
+                traceback.print_exc()
+                return  # user quit
+            
+            # ── Pause between rounds so user can see results ────────────
+            for _ in range(90):  # ~3 seconds at 30fps
+                if not self.running:
+                    return
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        self.running = False
+                self.clock.tick(30)
+        
+        # ── Final result ────────────────────────────────────────────────
+        self.screen.fill(BG_COLOR)
+        
+        player_wins = sum(1 for s in history if s["battle_result"]["winner"] == "player")
+        winner = "player" if player_wins > len(history) - player_wins else "enemy"
+        
+        self.draw_result(winner.upper(), "?")
+        
+        summary_surf = self.font_small.render(
+            f"You won {player_wins}/{len(history)} rounds", True, (200, 200, 200))
+        r = summary_surf.get_rect(center=(self.width // 2, self.height // 2 + 50))
+        self.screen.blit(summary_surf, r)
+        
+        restart_surf = self.font_tiny.render("Press ESC to quit", True, (150, 150, 150))
+        r = restart_surf.get_rect(center=(self.width // 2, self.height - 40))
+        self.screen.blit(restart_surf, r)
+        
+        pygame.display.flip()
+        
+        while self.running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    self.running = False
+        
+        pygame.quit()
+
+    def _animate_battle(self, sim, state, all_sims, BG_COLOR):
+        """Animate a single battle round. Returns True if user stayed."""
+        paused = False
+        tick_count = 0
+        last_processed_tick = -1
+        total_ticks_final = state["total_ticks"]
+        
+        # ── Визуальный индикатор скорости ────────────────────────────────
+        # speed_display_timer и ticks_per_frame берутся из self (сохраняются между раундами)
+        
+        effects = {"damage_numbers": [], "death_effects": [], "lines": [], "ability_effects": []}
+        
+        while self.running:
+            # ── ОБРАБОТКА СОБЫТИЙ — ОДИН РАЗ ЗА ИТЕРАЦИЮ! ─────────────────
+            # pygame.event.get() очищает очередь, поэтому вызываем только один раз.
+            # Все последующие проверки используют сохранённые события.
+            
+            events = pygame.event.get()
+            
+            # Отладка: выводим количество событий и их типы
+            if events and tick_count % 30 == 0:  # каждые ~1 секунду
+                print(f"[DEBUG] Events: {len(events)}, types: {[e.type for e in events[:5]]}")
+            
+            # Если нет фокуса — активируем окно
+            if not pygame.display.get_active():
+                try:
+                    pygame.display.set_mode((self.width, self.height), pygame.SRCALPHA)
+                except Exception:
+                    pass
+            
+            for event in events:
+                # Отладка: выводим ВСЮ информацию о событии
+                print(f"[RAW] type={event.type}, key={getattr(event, 'key', None)}, mod={getattr(event, 'mod', None)}")
+                
+                if event.type == pygame.QUIT:
+                    return False
+                elif event.type == pygame.KEYDOWN:
+                    # Безопасно определяем ключ (K_ADD/K_SUBTRACT нет в pygame-ce!)
+                    key_name = "Unknown"
+                    if hasattr(event, 'key'):
+                        if event.key == pygame.K_SPACE: key_name = "Space"
+                        elif event.key == pygame.K_ESCAPE: key_name = "Esc"
+                        elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, getattr(pygame, 'K_KP_PLUS', None)): key_name = "+/="
+                        elif event.key in (pygame.K_MINUS, getattr(pygame, 'K_KP_MINUS', None)): key_name = "-"
+                    
+                    print(f"[KEY] {key_name} -> key={getattr(event, 'key', None)}")
+                    
+                    if getattr(event, 'key', None) == pygame.K_ESCAPE:
+                        return False
+                    elif getattr(event, 'key', None) == pygame.K_SPACE:
+                        paused = not paused
+                    elif getattr(event, 'key', None) in (pygame.K_PLUS, pygame.K_EQUALS, getattr(pygame, 'K_KP_PLUS', None)):
+                        old_speed = self.ticks_per_frame
+                        self.ticks_per_frame = min(20, self.ticks_per_frame + 1)
+                        print(f"Speed UP -> {self.ticks_per_frame}")
+                        self.speed_display_timer = 60  # показывать 2 секунды
+                    elif getattr(event, 'key', None) in (pygame.K_MINUS, getattr(pygame, 'K_KP_MINUS', None)):
+                        old_speed = self.ticks_per_frame
+                        self.ticks_per_frame = max(1, self.ticks_per_frame - 1)
+                        print(f"Speed DOWN -> {self.ticks_per_frame}")
+                        self.speed_display_timer = 60  # показывать 2 секунды
+            
+            if paused:
+                self.clock.tick(30)
+                continue
+            
+            self.screen.fill(BG_COLOR)
+            
+            # Generate visual effects from battle log at this tick
+            player_units = [u for u in sim.teams.get("player", [])]
+            enemy_units = [u for u in sim.teams.get("enemy", [])]
+            positions = self._get_unit_positions(player_units, enemy_units)
+            
+            # Generate damage numbers and attack lines from damage events
+            if sim.log:
+                for evt in sim.log:
+                    if last_processed_tick < evt.get("tick", 0) <= tick_count:
+                        event_type = evt.get("type", "")
+                        
+                        # Damage events — show damage number on target
+                        if "damage" in event_type or ("attacker_id" in evt and "target_id" in evt):
+                            target_id = evt.get("target_id")
+                            target_unit = None
+                            for u in player_units + enemy_units:
+                                if u.unit_id == target_id:
+                                    target_unit = u
+                                    break
+                            target_pos = positions.get(target_unit) if target_unit else None
+                            if target_pos:
+                                dmg_color = (255, 100, 50) if event_type != "kill" else (255, 50, 50)
+                                effects["damage_numbers"].append(
+                                    DamageNumber(target_pos[0], target_pos[1] - 30,
+                                                evt.get("damage", 10), dmg_color)
+                                )
+                        
+                        # Attack lines — draw from attacker to target
+                        if "attacker_id" in evt and "target_id" in evt:
+                            attacker_id = evt.get("attacker_id")
+                            target_id = evt.get("target_id")
+                            attacker_unit = None
+                            target_unit = None
+                            for u in player_units + enemy_units:
+                                if u.unit_id == attacker_id:
+                                    attacker_unit = u
+                                if u.unit_id == target_id:
+                                    target_unit = u
+                            attacker_pos = positions.get(attacker_unit) if attacker_unit else None
+                            target_pos = positions.get(target_unit) if target_unit else None
+                            if attacker_pos and target_pos:
+                                line_color = (255, 200, 50) if evt.get("is_critical") else (200, 200, 200)
+                                effects["lines"].append(AttackLine(attacker_pos[0], attacker_pos[1], target_pos[0], target_pos[1], line_color))
+                        
+                        # Kill events — generate death effects
+                        if event_type == "kill":
+                            target_id = evt.get("target_id")
+                            attacker_team = evt.get("attacker_team")
+                            enemy_team = "enemy" if attacker_team == "player" else "player"
+                            for u in sim.teams.get(enemy_team, []):
+                                if u.unit_id == target_id and not u.alive:
+                                    target_pos = positions.get(u)
+                                    if target_pos:
+                                        effects["death_effects"].append(DeathEffect(target_pos[0], target_pos[1]))
+                        
+                        # Ability events — generate visual effects
+                        if "ability" in event_type or "ability_name" in evt:
+                            caster_id = evt.get("caster_id")
+                            caster_unit = None
+                            for u in player_units + enemy_units:
+                                if u.unit_id == caster_id and u.alive:
+                                    caster_unit = u
+                                    break
+                            if caster_unit:
+                                caster_pos = positions.get(caster_unit)
+                                if caster_pos:
+                                    ability_name = evt.get("ability_name", "Ability")
+                                    effect_type = "aoe_damage"
+                                    if "Огненный" in ability_name or "Fire" in ability_name:
+                                        effect_type = "aoe_damage"
+                                    elif "Метеор" in ability_name:
+                                        effect_type = "aoe_damage"
+                                    elif "Выстрел" in ability_name:
+                                        effect_type = "single_target_critical"
+                                    elif "Щит" in ability_name:
+                                        effect_type = "buff_allies"
+                                    elif "Волна" in ability_name or "slow" in str(evt.get("type", "")).lower():
+                                        effect_type = "aoe_damage_slow"
+                                    
+                                    effects["ability_effects"].append(
+                                        AbilityEffect(caster_pos[0], caster_pos[1],
+                                                     ability_name, effect_type)
+                                    )
+
+            # Draw battle scene
+            self._draw_battle_scene(sim, effects, tick_count)
+            
+            # Header
+            is_creep = state["is_creep"]
+            status = "CREEP" if is_creep else "PvP"
+            self.draw_header(state["round_number"], state["total_gold_after"], is_creep)
+            
+            # Battle log
+            if sim.log:
+                self.draw_battle_log(sim.log)
+            
+            # Tick counter
+            tick_surf = self.font_tiny.render(
+                f"Tick: {tick_count}/{total_ticks_final}", True, (150, 150, 255))
+            self.screen.blit(tick_surf, (self.width // 2 - 40, 380))
+            
+            # ── Визуальный индикатор скорости ────────────────────────────
+            if self.speed_display_timer > 0:
+                self.speed_display_timer -= 1
+                # Масштаб от 0→1→0 за время показа (плавное появление/исчезновение)
+                alpha = min(self.speed_display_timer / 30, (60 - self.speed_display_timer) / 30)
+                if alpha > 0:
+                    speed_level = self.ticks_per_frame
+                    label = "x1" if speed_level <= 1 else f"x{speed_level}"
+                    
+                    # Бейдж с фоном
+                    badge_text = f"Speed: {label}"
+                    badge_surf = self.font_tiny.render(badge_text, True, (255, 255, 100))
+                    badge_rect = badge_surf.get_rect(center=(self.width // 2 - 40, 398))
+                    
+                    # Фон бейджа
+                    pygame.draw.rect(self.screen, (40, 40, 60), 
+                                    (badge_rect.x - 4, badge_rect.y - 2, badge_rect.w + 8, badge_rect.h + 4), 
+                                    border_radius=4)
+                    pygame.draw.rect(self.screen, (150, 150, 100),
+                                    (badge_rect.x - 4, badge_rect.y - 2, badge_rect.w + 8, badge_rect.h + 4),
+                                    width=1, border_radius=4)
+                    self.screen.blit(badge_surf, badge_rect)
+            
+            pygame.display.flip()
+            
+            # Process 1 tick per frame for visible battle animation
+            if tick_count < total_ticks_final:
+                last_processed_tick = tick_count
+                tick_count += self.ticks_per_frame
+            
+            # Check if we've finished the round
+            if tick_count >= total_ticks_final:
+                # Show result briefly
+                self.screen.fill(BG_COLOR)
+                self._draw_battle_scene(sim, {"damage_numbers": [], "death_effects": [], "lines": []}, tick_count - 1)
+                
+                winner = state["battle_result"]["winner"]
+                ticks = state["battle_result"].get("ticks", "?")
+                result_text = f"ROUND {state['round_number']} COMPLETE"
+                self.draw_round_title(result_text)
+                
+                winner_surf = self.font_small.render(
+                    f"{winner.upper()} wins ({ticks} ticks)", True, (255, 200, 100))
+                r = winner_surf.get_rect(center=(self.width // 2, self.height // 2 + 40))
+                self.screen.blit(winner_surf, r)
+                
+                gold_text = f"+{state['gold_earned']} gold (+{state['interest_earned']}% interest)"
+                gold_surf = self.font_tiny.render(gold_text, True, (150, 255, 150))
+                r = gold_surf.get_rect(center=(self.width // 2, self.height // 2 + 70))
+                self.screen.blit(gold_surf, r)
+                
+                pygame.display.flip()
+                for _ in range(90):
+                    if not self.running: return False
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT: return False
+                    self.clock.tick(30)
+                
+                return True
+            
+            # Process 30fps for battle animation
+            self.clock.tick(30)
+        
+        return False
+
+
+def main():
+    """Entry point for the UI."""
+    from game.core.round import run_match
+
+    print("Running match...")
+    game = run_match(seed=42, verbose=False)
+    print(game.get_summary())
+
+    ui = GameUI(width=1200, height=800)
+    ui.run(game)
+
+
+if __name__ == "__main__":
+    main()

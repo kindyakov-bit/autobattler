@@ -1,0 +1,60 @@
+{
+  "items": {
+    "iron_cloak": {
+      "name": "Железная мантия",
+      "cost": 3,
+      "type": "armor",
+      "stats": {"hp_bonus": 200},
+      "description": "+200 HP"
+    },
+    "steel_plate": {
+      "name": "Стальной лат",
+      "cost": 5,
+      "type": "armor",
+      "stats": {"hp_bonus": 400},
+      "description": "+400 HP"
+    },
+    "power_blade": {
+      "name": "Клинок силы",
+      "cost": 3,
+      "type": "weapon",
+      "stats": {"damage_bonus": 25},
+      "description": "+25 урона"
+    },
+    "great_sword": {
+      "name": "Большой меч",
+      "cost": 5,
+      "type": "weapon",
+      "stats": {"damage_bonus": 50},
+      "description": "+50 урона"
+    },
+    "swift_boots": {
+      "name": "Потренированные сапоги",
+      "cost": 3,
+      "type": "accessory",
+      "stats": {"speed_bonus_pct": 15},
+      "description": "+15% скорости атаки"
+    },
+    "wind_chaser": {
+      "name": "Ветрогон",
+      "cost": 5,
+      "type": "accessory",
+      "stats": {"speed_bonus_pct": 30},
+      "description": "+30% скорости атаки"
+    },
+    "magic_ring": {
+      "name": "Магическое кольцо",
+      "cost": 4,
+      "type": "accessory",
+      "stats": {"hp_bonus": 150, "damage_bonus": 15},
+      "description": "+150 HP, +15 урона"
+    },
+    "dragon_heart": {
+      "name": "Сердце дракона",
+      "cost": 6,
+      "type": "legendary",
+      "stats": {"hp_bonus": 300, "damage_bonus": 40, "speed_bonus_pct": 10},
+      "description": "+300 HP, +40 урона, +10% скорости"
+    }
+  }
+}

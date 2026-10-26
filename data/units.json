@@ -1,0 +1,297 @@
+{
+  "synergies": {
+    "warrior": {
+      "name": "Воин",
+      "thresholds": [2, 4],
+      "bonuses": {
+        "2": {"hp_bonus_pct": 15},
+        "4": {"hp_bonus_pct": 30}
+      }
+    },
+    "mage": {
+      "name": "Маг",
+      "thresholds": [2, 4],
+      "bonuses": {
+        "2": {"mana_per_kill": 5},
+        "4": {"mana_per_kill": 10}
+      }
+    },
+    "archer": {
+      "name": "Стрелок",
+      "thresholds": [2, 4],
+      "bonuses": {
+        "2": {"attack_speed_pct": 15},
+        "4": {"attack_speed_pct": 30}
+      }
+    }
+  },
+
+  "units": {
+    "warrior_freshman": {
+      "name": "Новобранец",
+      "cost": 1,
+      "class": "warrior",
+      "hp": 500,
+      "damage": 40,
+      "attack_speed": 1.2,
+      "range": 1,
+      "description": "Базовый воин ближнего боя.",
+      "passive": {
+        "name": "Твёрдая кожа",
+        "desc": "+10% HP за каждого союзного воина",
+        "type": "synergy_buff",
+        "class": "warrior",
+        "effect": {"hp_bonus_pct_per_ally": 10}
+      },
+      "active": null
+    },
+    "warrior_veteran": {
+      "name": "Ветеран",
+      "cost": 2,
+      "class": "warrior",
+      "hp": 700,
+      "damage": 55,
+      "attack_speed": 1.0,
+      "range": 1,
+      "description": "Опытный воин с большим запасом здоровья.",
+      "passive": {
+        "name": "Железная воля",
+        "desc": "+15% HP за каждого союзного воина",
+        "type": "synergy_buff",
+        "class": "warrior",
+        "effect": {"hp_bonus_pct_per_ally": 15}
+      },
+      "active": null
+    },
+    "warrior_champion": {
+      "name": "Чемпион",
+      "cost": 3,
+      "class": "warrior",
+      "hp": 900,
+      "damage": 75,
+      "attack_speed": 0.9,
+      "range": 1,
+      "description": "Элитный воин ближнего боя.",
+      "passive": {
+        "name": "Боевой клич",
+        "desc": "+20% HP за каждого союзного воина",
+        "type": "synergy_buff",
+        "class": "warrior",
+        "effect": {"hp_bonus_pct_per_ally": 20}
+      },
+      "active": {
+        "name": "Боевой клич",
+        "desc": "Пассивный урон +5 к ближайшим врагам за каждого союзного воина",
+        "type": "aura",
+        "cooldown": 3,
+        "effect": {"bonus_damage_per_warrior": 5}
+      }
+    },
+    "warrior_knight": {
+      "name": "Рыцарь",
+      "cost": 5,
+      "class": "warrior",
+      "hp": 1400,
+      "damage": 95,
+      "attack_speed": 0.8,
+      "range": 1,
+      "description": "Тяжёлый рыцарь — танк команды.",
+      "passive": {
+        "name": "Несокрушимость",
+        "desc": "+25% HP за каждого союзного воина",
+        "type": "synergy_buff",
+        "class": "warrior",
+        "effect": {"hp_bonus_pct_per_ally": 25}
+      },
+      "active": {
+        "name": "Щитовая стена",
+        "desc": "Снижает входящий урон на 30% для всех союзников в радиусе 1 (на 2 тика)",
+        "type": "buff_allies",
+        "cooldown": 4,
+        "effect": {"damage_reduction_pct": 30, "duration": 2}
+      }
+    },
+
+    "mage_acolyte": {
+      "name": "Послушник",
+      "cost": 1,
+      "class": "mage",
+      "hp": 300,
+      "damage": 65,
+      "attack_speed": 1.0,
+      "range": 4,
+      "description": "Базовый маг дальнего боя.",
+      "passive": {
+        "name": "Магическая аура",
+        "desc": "+10% урона за каждого союзного мага",
+        "type": "synergy_buff",
+        "class": "mage",
+        "effect": {"damage_bonus_pct_per_ally": 10}
+      },
+      "active": null
+    },
+    "mage_sorcerer": {
+      "name": "Маг-чародей",
+      "cost": 2,
+      "class": "mage",
+      "hp": 350,
+      "damage": 85,
+      "attack_speed": 0.9,
+      "range": 4,
+      "description": "Сильный маг с высоким уроном.",
+      "passive": {
+        "name": "Усиление магии",
+        "desc": "+15% урона за каждого союзного мага",
+        "type": "synergy_buff",
+        "class": "mage",
+        "effect": {"damage_bonus_pct_per_ally": 15}
+      },
+      "active": {
+        "name": "Огненный шар",
+        "desc": "Наносит 80 урона всем врагам в радиусе 2",
+        "type": "aoe_damage",
+        "cooldown": 3,
+        "effect": {"damage": 80, "radius": 2}
+      }
+    },
+    "mage_archmage": {
+      "name": "Архимаг",
+      "cost": 3,
+      "class": "mage",
+      "hp": 400,
+      "damage": 120,
+      "attack_speed": 0.8,
+      "range": 5,
+      "description": "Мощный маг с увеличенной дальностью.",
+      "passive": {
+        "name": "Великая магия",
+        "desc": "+20% урона за каждого союзного мага",
+        "type": "synergy_buff",
+        "class": "mage",
+        "effect": {"damage_bonus_pct_per_ally": 20}
+      },
+      "active": {
+        "name": "Метеор",
+        "desc": "Наносит 150 урона всем врагам (огромный радиус)",
+        "type": "aoe_damage",
+        "cooldown": 4,
+        "effect": {"damage": 150, "radius": 3}
+      }
+    },
+    "mage_sage": {
+      "name": "Мудрец",
+      "cost": 5,
+      "class": "mage",
+      "hp": 450,
+      "damage": 160,
+      "attack_speed": 0.7,
+      "range": 6,
+      "description": "Легендарный маг — самый высокий урон.",
+      "passive": {
+        "name": "Вечная мудрость",
+        "desc": "+25% урона за каждого союзного мага",
+        "type": "synergy_buff",
+        "class": "mage",
+        "effect": {"damage_bonus_pct_per_ally": 25}
+      },
+      "active": {
+        "name": "Волна разрушения",
+        "desc": "Наносит 200 урона всем врагам и замедляет на 1 тик",
+        "type": "aoe_damage_slow",
+        "cooldown": 5,
+        "effect": {"damage": 200, "radius": 3, "slow_duration": 1}
+      }
+    },
+
+    "archer_scout": {
+      "name": "Скаут",
+      "cost": 1,
+      "class": "archer",
+      "hp": 250,
+      "damage": 45,
+      "attack_speed": 1.5,
+      "range": 3,
+      "description": "Базовый стрелок ближнего дальнего боя.",
+      "passive": {
+        "name": "Зоркий глаз",
+        "desc": "+10% скорости атаки за каждого союзного стрелка",
+        "type": "synergy_buff",
+        "class": "archer",
+        "effect": {"speed_bonus_pct_per_ally": 10}
+      },
+      "active": null
+    },
+    "archer_ranger": {
+      "name": "Следопыт",
+      "cost": 2,
+      "class": "archer",
+      "hp": 300,
+      "damage": 65,
+      "attack_speed": 1.4,
+      "range": 3,
+      "description": "Опытный стрелок с хорошим уроном.",
+      "passive": {
+        "name": "Следящий глаз",
+        "desc": "+15% скорости атаки за каждого союзного стрелка",
+        "type": "synergy_buff",
+        "class": "archer",
+        "effect": {"speed_bonus_pct_per_ally": 15}
+      },
+      "active": {
+        "name": "Огненные стрелы",
+        "desc": "Следующая атака наносит +50 урона всем врагам в радиусе 1",
+        "type": "buff_next_attack",
+        "cooldown": 3,
+        "effect": {"bonus_damage": 50, "radius": 1}
+      }
+    },
+    "archer_marksman": {
+      "name": "Снайпер",
+      "cost": 3,
+      "class": "archer",
+      "hp": 280,
+      "damage": 95,
+      "attack_speed": 1.2,
+      "range": 5,
+      "description": "Дальнобойный снайпер.",
+      "passive": {
+        "name": "Меткий глаз",
+        "desc": "+20% скорости атаки за каждого союзного стрелка",
+        "type": "synergy_buff",
+        "class": "archer",
+        "effect": {"speed_bonus_pct_per_ally": 20}
+      },
+      "active": {
+        "name": "Выстрел смерти",
+        "desc": "Наносит 100 урона самому слабому врагу (гарантированный крит)",
+        "type": "single_target_critical",
+        "cooldown": 4,
+        "effect": {"damage": 100}
+      }
+    },
+    "archer_battleheart": {
+      "name": "Боевое Сердце",
+      "cost": 5,
+      "class": "archer",
+      "hp": 350,
+      "damage": 140,
+      "attack_speed": 1.6,
+      "range": 4,
+      "description": "Легендарный стрелок — высокий урон и скорость.",
+      "passive": {
+        "name": "Сердце воина",
+        "desc": "+25% скорости атаки за каждого союзного стрелка",
+        "type": "synergy_buff",
+        "class": "archer",
+        "effect": {"speed_bonus_pct_per_ally": 25}
+      },
+      "active": {
+        "name": "Дождь из стрел",
+        "desc": "Наносит 180 урона всем врагам в радиусе 2, +20% скорости на 3 тика",
+        "type": "aoe_damage_buff",
+        "cooldown": 5,
+        "effect": {"damage": 180, "radius": 2, "speed_buff_duration": 3, "speed_bonus_pct": 20}
+      }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+
+# Тесты / кэши
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Виртуальные окружения
+.venv/
+venv/
+env/
+
+# Временные артефакты отладки
+debug_log.txt
+debug_output.txt
+
+# Одноразовые скрипты отладки (не удалены, но вынесены из проекта)
+_scratch/
+
+# OS
+Thumbs.db
+desktop.ini
