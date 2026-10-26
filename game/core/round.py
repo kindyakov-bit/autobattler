@@ -100,7 +100,7 @@ class Game:
         sim.add_team("player", player_units)
         sim.add_team("enemy", enemy_units)
         self.all_sims[self.round_number] = sim
-        state.battle_result = sim.run(max_ticks=600)
+        state.battle_result = sim.run()
         # Сохраняем количество тиков для UI
         state.total_ticks = sim.get_total_ticks()
 
@@ -156,6 +156,54 @@ def load_game_data(json_path: str | Path) -> dict:
     """Загрузить данные из JSON."""
     with open(json_path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+# Волны крипов по номеру раунда. Раньше крипы были одинаковы во всех
+# крип-раундах — три раунда подряд one and the same бой.
+# Сложность растёт и числом, и качеством юнитов.
+CREEP_WAVES: dict[int, list[str]] = {
+    1: ["warrior_freshman", "archer_scout"],
+    2: ["warrior_freshman", "warrior_freshman", "archer_scout"],
+    3: ["warrior_veteran", "warrior_freshman", "archer_scout", "archer_scout"],
+    6: ["warrior_veteran", "warrior_freshman", "archer_scout",
+        "archer_scout", "mage_acolyte"],
+}
+# Для раундов вне таблицы (9, 12, ...) — последняя волна + ещё юнит
+CREEP_FALLBACK_GROWTH = 1
+
+
+def creep_wave_for(round_num: int) -> list[str]:
+    """Состав волны крипов для раунда round_num."""
+    if round_num in CREEP_WAVES:
+        return list(CREEP_WAVES[round_num])
+    last_round = max(CREEP_WAVES)
+    wave = list(CREEP_WAVES[last_round])
+    extra = round_num // 3 - last_round // 3
+    for _ in range(max(0, extra) * CREEP_FALLBACK_GROWTH):
+        wave.append("warrior_veteran")
+    return wave
+
+
+def build_creep_units(round_num: int, all_units: dict) -> list[dict]:
+    """Собрать врагов крип-раунда в формате для боя."""
+    units = []
+    for key in creep_wave_for(round_num):
+        ud = all_units.get(key)
+        if not ud:
+            continue
+        d = {
+            "name": ud["name"],
+            "hp": ud["hp"],
+            "damage": ud["damage"],
+            "attack_speed": ud["attack_speed"],
+            "range_": ud["range"],
+            "class": ud["class"],
+            "crit_chance": ud.get("crit_chance", 0),
+        }
+        if ud.get("active"):
+            d["active"] = dict(ud["active"])
+        units.append(d)
+    return units
 
 
 def _bot_draft_with_shop(bot, draft_phase: DraftPhase, unit_data: dict, gold: int, player: Player) -> list[dict]:

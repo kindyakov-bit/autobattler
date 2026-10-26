@@ -22,7 +22,7 @@
       "cost": 1,
       "class": "warrior",
       "hp": 500,
-      "damage": 40,
+      "damage": 80,
       "attack_speed": 1.2,
       "range": 1,
       "crit_chance": 10,
@@ -41,7 +41,7 @@
       "cost": 2,
       "class": "warrior",
       "hp": 700,
-      "damage": 55,
+      "damage": 110,
       "attack_speed": 1.0,
       "range": 1,
       "crit_chance": 10,
@@ -60,7 +60,7 @@
       "cost": 3,
       "class": "warrior",
       "hp": 900,
-      "damage": 75,
+      "damage": 150,
       "attack_speed": 0.9,
       "range": 1,
       "crit_chance": 10,
@@ -76,16 +76,16 @@
         "name": "Боевой клич",
         "desc": "Даёт +5 к урону за каждого союзного воина на 6 тиков",
         "type": "aura",
-        "cooldown": 60,
-        "effect": {"bonus_damage_per_ally": 5, "duration": 50}
+        "cooldown": 30,
+        "effect": {"bonus_damage_per_ally": 5, "duration": 25}
       }
     },
     "warrior_knight": {
       "name": "Рыцарь",
       "cost": 5,
       "class": "warrior",
-      "hp": 1400,
-      "damage": 95,
+      "hp": 900,
+      "damage": 190,
       "attack_speed": 0.8,
       "range": 1,
       "crit_chance": 10,
@@ -101,8 +101,8 @@
         "name": "Щитовая стена",
         "desc": "Снижает входящий урон на 30% всем союзникам на 20 тиков",
         "type": "buff_allies",
-        "cooldown": 60,
-        "effect": {"damage_reduction_pct": 30, "duration": 30}
+        "cooldown": 30,
+        "effect": {"damage_reduction_pct": 30, "duration": 15}
       }
     },
     "mage_acolyte": {
@@ -110,7 +110,7 @@
       "cost": 1,
       "class": "mage",
       "hp": 300,
-      "damage": 65,
+      "damage": 130,
       "attack_speed": 1.0,
       "range": 4,
       "crit_chance": 10,
@@ -129,7 +129,7 @@
       "cost": 2,
       "class": "mage",
       "hp": 350,
-      "damage": 85,
+      "damage": 170,
       "attack_speed": 0.9,
       "range": 4,
       "crit_chance": 10,
@@ -145,7 +145,7 @@
         "name": "Огненный шар",
         "desc": "Наносит 80 урона всем врагам в радиусе 2",
         "type": "aoe_damage",
-        "cooldown": 60,
+        "cooldown": 30,
         "effect": {"damage": 80, "radius": 2}
       }
     },
@@ -154,7 +154,7 @@
       "cost": 3,
       "class": "mage",
       "hp": 400,
-      "damage": 120,
+      "damage": 240,
       "attack_speed": 0.8,
       "range": 5,
       "crit_chance": 10,
@@ -170,7 +170,7 @@
         "name": "Метеор",
         "desc": "Наносит 150 урона всем врагам (огромный радиус)",
         "type": "aoe_damage",
-        "cooldown": 80,
+        "cooldown": 40,
         "effect": {"damage": 150, "radius": 3}
       }
     },
@@ -179,7 +179,7 @@
       "cost": 5,
       "class": "mage",
       "hp": 450,
-      "damage": 160,
+      "damage": 320,
       "attack_speed": 0.7,
       "range": 6,
       "crit_chance": 10,
@@ -195,12 +195,12 @@
         "name": "Волна разрушения",
         "desc": "Наносит 200 урона всем врагам и замедляет их на 30% на 10 тиков",
         "type": "aoe_damage_slow",
-        "cooldown": 90,
+        "cooldown": 45,
         "effect": {
           "damage": 200,
           "radius": 3,
           "slow_pct": 30,
-          "slow_duration": 10
+          "slow_duration": 5
         }
       }
     },
@@ -209,7 +209,7 @@
       "cost": 1,
       "class": "archer",
       "hp": 250,
-      "damage": 45,
+      "damage": 90,
       "attack_speed": 1.5,
       "range": 3,
       "crit_chance": 15,
@@ -228,7 +228,7 @@
       "cost": 2,
       "class": "archer",
       "hp": 300,
-      "damage": 65,
+      "damage": 130,
       "attack_speed": 1.4,
       "range": 3,
       "crit_chance": 15,
@@ -244,8 +244,8 @@
         "name": "Огненные стрелы",
         "desc": "Следующая атака наносит +50 урона и бьёт до 3 врагов с переднего края",
         "type": "buff_next_attack",
-        "cooldown": 30,
-        "effect": {"bonus_damage": 50, "radius": 2, "duration": 25}
+        "cooldown": 15,
+        "effect": {"bonus_damage": 50, "radius": 2, "duration": 12}
       }
     },
     "archer_marksman": {
@@ -253,7 +253,7 @@
       "cost": 3,
       "class": "archer",
       "hp": 280,
-      "damage": 95,
+      "damage": 190,
       "attack_speed": 1.2,
       "range": 5,
       "crit_chance": 20,
@@ -269,7 +269,7 @@
         "name": "Выстрел смерти",
         "desc": "Наносит 100 урона самому слабому врагу (гарантированный крит)",
         "type": "single_target_critical",
-        "cooldown": 50,
+        "cooldown": 25,
         "effect": {"damage": 100}
       }
     },
@@ -278,7 +278,7 @@
       "cost": 5,
       "class": "archer",
       "hp": 350,
-      "damage": 140,
+      "damage": 280,
       "attack_speed": 1.6,
       "range": 4,
       "crit_chance": 15,
@@ -294,12 +294,12 @@
         "name": "Дождь из стрел",
         "desc": "Наносит 180 урона всем врагам в радиусе 2, +20% скорости атаки на 20 тиков",
         "type": "aoe_damage_buff",
-        "cooldown": 40,
+        "cooldown": 20,
         "effect": {
           "damage": 180,
           "radius": 2,
           "speed_bonus_pct": 20,
-          "speed_bonus_duration": 20
+          "speed_bonus_duration": 10
         }
       }
     }

@@ -72,21 +72,45 @@ class SimpleBot:
 
     def _medium_draft(self, available_units: dict, gold: int,
                       current_team: list[dict], synergy_data: dict) -> list[dict]:
-        """MEDIUM: tries to build a 2+ class synergy."""
+        """MEDIUM: строит синергию — добирает порог 2/4 одного класса.
+
+        Раньше код искал класс, где «не хватает одного юнита до порога», но
+        такое условие требовало уже имеющегося юнита этого класса. Бот всегда
+        стартует с пустой доски, поэтому target_class никогда не выбирался и
+        синергии не строились никогда. Теперь бот сам выбирает целевой класс.
+        """
         class_counts = {}
         for u in current_team:
             cls = u.get("class")
             if cls:
                 class_counts[cls] = class_counts.get(cls, 0) + 1
 
-        # Ищем синергию, где не хватает ровно одного юнита до порога
-        target_class = None
+        # Выбираем класс, который выгоднее всего добирать: чем ниже порог и
+        # чем дешевле юниты класса, тем лучше. Учитываем уже купленных.
+        best_class, best_score = None, -1.0
         for syn_name, syn_info in synergy_data.items():
-            count = class_counts.get(syn_name, 0)
-            thresholds = syn_info.get("thresholds", [])
-            if count >= 1 and thresholds and count < max(thresholds):
-                target_class = syn_name
-                break
+            thresholds = sorted(syn_info.get("thresholds", []))
+            if not thresholds:
+                continue
+            have = class_counts.get(syn_name, 0)
+            need = next((t for t in thresholds if t > have), None)
+            if need is None:
+                continue
+            to_buy = need - have
+            units_of_class = [(k, u) for k, u in available_units.items()
+                              if u.get("class") == syn_name]
+            if len(units_of_class) < to_buy:
+                continue
+            cheapest = sorted((u.get("cost", 1) for _, u in units_of_class))[:to_buy]
+            price = sum(cheapest)
+            if price > gold:
+                continue
+            # выгоднее: низкая цена за порог и низкий сам порог
+            score = (len(thresholds) - thresholds.index(need)) * 10 - price
+            if score > best_score:
+                best_class, best_score = syn_name, score
+
+        target_class = best_class if best_class is not None else "warrior"
 
         same = [(k, u) for k, u in available_units.items()
                 if u.get("class") == target_class]

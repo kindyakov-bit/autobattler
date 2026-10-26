@@ -95,13 +95,18 @@ class TestDataInvariants:
                 f"{key}: способность '{ud['active']['name']}' не зарегистрирована")
 
     def test_every_active_ability_actually_casts(self, unit_data):
-        """И ещё: она действительно срабатывает в бою."""
+        """И ещё: она действительно срабатывает в бою.
+
+        Враг — «мешок» с огромным HP и нулевым уроном: проверяем именно
+        каст, а не то, успеет ли юнит выжить (от баланса это не зависит).
+        """
         for key, ud in unit_data.items():
             if not ud.get("active"):
                 continue
             sim = BattleSimulator(seed=7)
             sim.add_team("player", [mk(key, unit_data)])
-            sim.add_team("enemy", [mk("warrior_knight", unit_data)] * 3)
+            sim.add_team("enemy", [simple("dummy", 100000, 0, 1.0, 1, "warrior")
+                                   for _ in range(3)])
             u = sim.teams["player"][0]
             sim.run(max_ticks=600)
             casts = [e for e in sim.get_ability_events()

@@ -1631,7 +1631,7 @@ class GameUI:
         Keys during draft: W=Buy(1g) S=Sell-last D=Place F=Remove R=Roll N=Next Enter=Done
         During battle: SPACE=Pause +/-=Speed ESC=Quit
         """
-        from game.core.round import load_game_data
+        from game.core.round import load_game_data, build_creep_units
         from game.core.shop import Shop
         from game.core.pool import Pool
         from game.core.draft import DraftPhase
@@ -1686,11 +1686,8 @@ class GameUI:
             stored_player_units = player_units
 
             if is_creep:
-                # Крипы — фиксированный состав врага
-                enemy_units = [
-                    dict(all_units["warrior_freshman"]),
-                    dict(all_units["archer_scout"]),
-                ]
+                # Крипы: волна растёт с номером раунда (раньше была одинаковой)
+                enemy_units = build_creep_units(round_num, all_units)
             else:
                 # Bot drafts enemy units via shop — bot has its own economy (independent from player)
                 bot_gold = 20  # bot economy — enough for a full board
@@ -1701,9 +1698,12 @@ class GameUI:
                 draft_phase = DraftPhase(shop, all_units)
                 enemy_player = Player(gold=bot_gold)
                 
-                # Bot decides what to buy with its own gold
+                # Bot decides what to buy with its own gold.
+                # synergy_data раньше передавался пустым — из-за этого
+                # синергийная логика MEDIUM-бота не работала никогда.
                 draft_decision = bot.decide_draft(
-                    available_units=all_units, gold=bot_gold, current_team=[], synergy_data={}
+                    available_units=all_units, gold=bot_gold, current_team=[],
+                    synergy_data=data["synergies"],
                 )
                 
                 purchased = []
@@ -1760,7 +1760,7 @@ class GameUI:
             sim = BattleSimulator(seed=seed + round_num)
             sim.add_team("player", player_units)
             sim.add_team("enemy", enemy_units)
-            battle_result = sim.run(max_ticks=600)
+            battle_result = sim.run()
             total_ticks = sim.get_total_ticks()
             
             # Economy + HP: проигранный PvP бьёт тем сильнее,

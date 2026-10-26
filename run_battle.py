@@ -64,7 +64,7 @@ def run_battle(seed: int, verbose: bool = False):
         print(f"=== БОЙ (seed={seed}) ===")
         print()
 
-    result = sim.run(max_ticks=600)
+    result = sim.run()
 
     # Вывод результатов
     print(f"\n{'='*50}")

@@ -77,6 +77,11 @@ MAX_CLOSING_TICKS = 1000
 # складываться в 100%+ и потом лечить юнита отрицательным уроном.
 MAX_DAMAGE_REDUCTION_PCT = 90
 
+# Лимит тиков одного боя. Подобран так, чтобы бои доигрывались до
+# annihilation даже на медленных танковых составах: зеркальный бой
+# 4 воинов (рыцари с 900 HP, удар раз в 75 тиков) занимал ~600 тиков.
+MAX_BATTLE_TICKS = 900
+
 
 class Unit:
     """Юнит на поле боя."""
@@ -339,13 +344,25 @@ class BattleSimulator:
 
         База — ``1 + (i + j + 1) // 2``: юнит с индексом i и враг с индексом j
         оба отстоят от переднего края своей команды.
+
+        Сближение применяется к ЛЮБОМУ юниту, у которого нет цели в радиусе:
+        иначе задняя линия выживших оказывается недосягаемой, и бой топчется
+        на месте до таймаута (замер: 6v6 = 600 тиков при 18 атаках).
         """
         ai = self._team_index.get(attacker.unit_id, 0)
         tj = self._team_index.get(target.unit_id, 0)
         base = 1 + (ai + tj + 1) // 2
-        if attacker.range_ <= 1 and attacker.closing:
+        if attacker.closing:
             base = max(1, base - attacker.closing // MOVE_TICKS_PER_COLUMN)
         return base
+
+    def _has_target_in_range(self, unit: Unit) -> bool:
+        """Есть ли живой враг, до которого юнит сейчас достаёт."""
+        enemies = self._alive_enemies(unit)
+        if not enemies:
+            return False
+        nearest = min(enemies, key=lambda e: self.distance_to(unit, e))
+        return unit.range_ >= self.distance_to(unit, nearest)
 
     def _alive_enemies(self, unit: Unit) -> list[Unit]:
         return [u for t, lst in self.teams.items()
@@ -641,8 +658,8 @@ class BattleSimulator:
 
     # ── Основной цикл ──────────────────────────────────────────────────────
 
-    def run(self, max_ticks: int = 600) -> dict:
-        """Запустить бой. max_ticks — лимит (по умолчанию 10 секунд игры)."""
+    def run(self, max_ticks: int = MAX_BATTLE_TICKS) -> dict:
+        """Запустить бой. max_ticks — лимит (по умолчанию MAX_BATTLE_TICKS)."""
         self.log = []
         self.tick_count = 0
         self._tick_history = []
@@ -671,8 +688,11 @@ class BattleSimulator:
                 if unit.active_ability and unit.ability_cooldown > 0:
                     unit.ability_cooldown -= 1
 
-                # 3. Ближние юниты сближаются с врагом
-                if unit.range_ <= 1 and unit.closing < MAX_CLOSING_TICKS:
+                # 3. Не достаём ни до кого — сближаемся на один тик.
+                #    Раньше это делали только ближние юниты, и бой вставал
+                #    насмерть, когда выживали дальние.
+                if (unit.closing < MAX_CLOSING_TICKS
+                        and not self._has_target_in_range(unit)):
                     unit.closing += 1
 
                 # 4. Атака

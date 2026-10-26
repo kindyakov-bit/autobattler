@@ -147,8 +147,9 @@ class TestRoundEndScreen:
             return d
 
         sim = BattleSimulator(seed=42)
-        sim.add_team("player", [full("warrior_freshman"), full("mage_acolyte")])
-        sim.add_team("enemy", [full("warrior_freshman"), full("archer_scout")])
+        sim.add_team("player", [full("warrior_freshman"), full("warrior_veteran"),
+                                full("mage_acolyte")])
+        sim.add_team("enemy", [full("archer_scout")])
         return sim, sim.run(max_ticks=600)
 
     def test_final_frame_shows_losers_dead(self, draft_env):
