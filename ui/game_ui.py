@@ -1974,9 +1974,18 @@ class GameUI:
             
             # Check if we've finished the round
             if tick_count >= total_ticks_final:
-                # Show result briefly
+                # Show result briefly.
+                # Раньше здесь был `tick_count - 1` — экран результата
+                # перерисовывался предПОСЛЕДНЬ кадром, поэтому поверженный
+                # враг выглядел живым с полной зеленой полоской HP.
+                # total_ticks_final == числу снапшотов, т.е. это финальное
+                # состояние, где проигравшие уже мертвы.
                 self.screen.fill(BG_COLOR)
-                self._draw_battle_scene(sim, {"damage_numbers": [], "death_effects": [], "lines": []}, tick_count - 1)
+                self._draw_battle_scene(
+                    sim,
+                    {"damage_numbers": [], "death_effects": [], "lines": []},
+                    total_ticks_final,
+                )
                 
                 winner = state["battle_result"]["winner"]
                 ticks = state["battle_result"].get("ticks", "?")

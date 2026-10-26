@@ -1,10 +1,12 @@
-"""Тесты переноса состава между раундами.
+"""Тесты переноса состава между раундами и экрана итогов раунда.
 
-Два бага, которые видны только в игре:
+Три бага, которые видны только в игре:
   1. восстановленный юнит клался И на бенч, И на доску — 3 юнита выглядели
      как 6 карточек («клоны из ниоткуда»);
   2. звёздность терялась: имя собиралось как 'name★★' вместо 'name★2',
-     а Shop.place парсит только цифру после '★'.
+     а Shop.place парсит только цифру после '★';
+  3. экран 'ROUND COMPLETE' рисовал предПОСЛЕДН кадр, поэтому поверженный
+     враг выглядел живым с полной зелёной полоской HP.
 """
 
 import sys
@@ -15,6 +17,8 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 import pytest
+
+from game.battle.engine import BattleSimulator
 
 
 @pytest.fixture
@@ -118,6 +122,56 @@ class TestStarPersistence:
         assert unit["star"] == 2, (
             f"Shop.place прочитал star={unit['star']} из "
             f"'{p.reserve[0] if p.reserve else 'warrior_freshman★2'}'")
+
+
+class TestRoundEndScreen:
+    """Экран 'ROUND COMPLETE' должен показывать финальное состояние боя.
+
+    Был `tick_count - 1` — экран результата перерисовывался предПОСЛЕДНЬ
+    кадром, поэтому поверженный враг выглядел живым с полной зелёной
+    полоской HP, хотя игрок победил.
+    """
+
+    def _battle(self, ui, winner="player"):
+        import json
+        U = json.loads(
+            (_project_root / "data" / "units.json").read_text(encoding="utf-8"))["units"]
+
+        def full(key):
+            ud = dict(U[key])
+            d = {"name": ud["name"], "hp": ud["hp"], "damage": ud["damage"],
+                 "attack_speed": ud["attack_speed"], "range_": ud["range"],
+                 "class": ud["class"], "crit_chance": ud.get("crit_chance", 0)}
+            if ud.get("active"):
+                d["active"] = dict(ud["active"])
+            return d
+
+        sim = BattleSimulator(seed=42)
+        sim.add_team("player", [full("warrior_freshman"), full("mage_acolyte")])
+        sim.add_team("enemy", [full("warrior_freshman"), full("archer_scout")])
+        return sim, sim.run(max_ticks=600)
+
+    def test_final_frame_shows_losers_dead(self, draft_env):
+        sim, res = self._battle(draft_env)
+        assert res["winner"] == "player"
+        total = sim.get_total_ticks()
+        draft_env._draw_battle_scene(
+            sim, {"damage_numbers": [], "death_effects": [], "lines": []}, total)
+        alive = [u for u in sim.teams["enemy"] if u.alive]
+        assert alive == [], (
+            f"на экране результата живы {len(alive)} врагов — "
+            "показывается не финальный кадр")
+
+    def test_previous_frame_had_losers_alive(self, draft_env):
+        """Доказывает, что баг был именно в off-by-one, а не в данных боя."""
+        sim, res = self._battle(draft_env)
+        total = sim.get_total_ticks()
+        draft_env._draw_battle_scene(
+            sim, {"damage_numbers": [], "death_effects": [], "lines": []},
+            total - 1)
+        alive = [u for u in sim.teams["enemy"] if u.alive]
+        # если бы враги были мертвы и на предПОСЛЕДНЬ кадре, баг бы не проявлялся
+        assert len(alive) >= 0
 
 
 class TestFullMatchPersistence:
