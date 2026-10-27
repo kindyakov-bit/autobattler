@@ -828,10 +828,44 @@ class GameUI:
             # Tooltip при наведении
             if hovered:
                 if name_key.startswith("ITEM:"):
+                    # Предмет: что он делает (описание + статы), без шанса
                     desc = item.get("description", "")
-                    tooltip = f"{name}\n${cost}  шанс: {item_chance_pct}%\n{desc}"
+                    stats = item.get("stats", {})
+                    stat_labels = {
+                        "hp_bonus": "+{} HP",
+                        "damage_bonus": "+{} урона",
+                        "speed_bonus_pct": "+{}% скор. атаки",
+                    }
+                    stat_parts = [
+                        stat_labels.get(k, k).format(v)
+                        for k, v in stats.items()
+                    ]
+                    stats_text = " | ".join(stat_parts)
+                    tooltip = f"{name}\n${cost}"
+                    if desc:
+                        tooltip += f"\n{desc}"
+                    if stats_text:
+                        tooltip += f"\n{stats_text}"
                 else:
-                    tooltip = f"{name}\n${cost}  шанс: {unit_chance_pct}%\nКласс: {cls}"
+                    # Юнит: способности (пассивка + активка), класс, без шанса
+                    ud = self.all_units.get(name_key, {})
+                    unit_desc = ud.get("description", "")
+                    lines = [f"{name}\n${cost}", f"Класс: {cls}"]
+                    if unit_desc:
+                        lines.append(unit_desc)
+                    passive = ud.get("passive")
+                    if passive:
+                        lines.append(
+                            f"Пассивка: {passive.get('name', '')} — {passive.get('desc', '')}"
+                        )
+                    active = ud.get("active")
+                    if active:
+                        cd = active.get("cooldown")
+                        cd_text = f" (к/д {cd} тиков)" if cd else ""
+                        lines.append(
+                            f"Активка: {active.get('name', '')} — {active.get('desc', '')}{cd_text}"
+                        )
+                    tooltip = "\n".join(lines)
                 draw_tooltip(self.screen, x, shop_y + SHOP_H + 18, tooltip, self.font_tiny)
 
         # ── BENCH section (юниты в запасе, внизу) ──
@@ -1064,6 +1098,8 @@ class GameUI:
                 "cost": i["cost"],
                 "item_key": i.get("item_key", ""),
                 "type": (getattr(self, "items_data", {}) or {}).get("items", {}).get(i.get("item_key", ""), {}).get("type", "accessory"),
+                "stats": i.get("stats", {}),
+                "description": i.get("description", ""),
             }
             for i in item_items
         ]
