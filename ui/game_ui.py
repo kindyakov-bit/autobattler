@@ -1459,7 +1459,8 @@ class GameUI:
                                         else:
                                             # Пустая клетка
                                             if self.selected_bench_idx is not None \
-                                                    and self.selected_bench_idx < len(player.reserve):
+                                                    and self.selected_bench_idx < len(player.reserve) \
+                                                    and len(player.board) < player.max_board:
                                                 # Поставить выбранного юнита с бенча на клетку
                                                 bench_idx = self.selected_bench_idx
                                                 unit_name = player.reserve[bench_idx]
@@ -1505,26 +1506,30 @@ class GameUI:
                                     for u in player.board
                                 )
                                 if not occupied:
-                                    bench_idx = self.drag_bench_idx
-                                    if bench_idx < len(player.reserve):
-                                        unit_name = player.reserve[bench_idx]
-                                        player.reserve.pop(bench_idx)
-                                        new_unit = {
-                                            "name": unit_name,
-                                            "star": 1,
-                                            "row": click_r,
-                                            "col": click_c,
-                                        }
-                                        name_base = unit_name.split("★")[0]
-                                        if name_base in all_units:
-                                            ud = all_units[name_base]
-                                            player.board.append(new_unit)
-                                            shop.set_base_stats(
-                                                player, len(player.board) - 1,
-                                                int(ud["hp"] * (1.5 if new_unit.get("star", 1) == 2 else 2.0 if new_unit.get("star", 1) == 3 else 1)),
-                                                int(ud["damage"] * (1.5 if new_unit.get("star", 1) == 2 else 2.0 if new_unit.get("star", 1) == 3 else 1)),
-                                                ud["attack_speed"])
-                                            self.play_sound("click")
+                                    if len(player.board) >= player.max_board:
+                                        # Доска полна — юнт остаётся наベンче
+                                        pass
+                                    else:
+                                        bench_idx = self.drag_bench_idx
+                                        if bench_idx < len(player.reserve):
+                                            unit_name = player.reserve[bench_idx]
+                                            player.reserve.pop(bench_idx)
+                                            new_unit = {
+                                                "name": unit_name,
+                                                "star": 1,
+                                                "row": click_r,
+                                                "col": click_c,
+                                            }
+                                            name_base = unit_name.split("★")[0]
+                                            if name_base in all_units:
+                                                ud = all_units[name_base]
+                                                player.board.append(new_unit)
+                                                shop.set_base_stats(
+                                                    player, len(player.board) - 1,
+                                                    int(ud["hp"] * (1.5 if new_unit.get("star", 1) == 2 else 2.0 if new_unit.get("star", 1) == 3 else 1)),
+                                                    int(ud["damage"] * (1.5 if new_unit.get("star", 1) == 2 else 2.0 if new_unit.get("star", 1) == 3 else 1)),
+                                                    ud["attack_speed"])
+                                                self.play_sound("click")
                         self.drag_bench_idx = None
 
                     # ── Если тащили юнт с клетки поля — разместить на новой клетке ──

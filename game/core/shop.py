@@ -81,6 +81,8 @@ class Shop:
         """Положить юнита из резерва на доску по индексу."""
         if idx < 0 or idx >= len(player.reserve):
             raise ShopError(f"Индекс {idx} вне диапазона (reserve={len(player.reserve)})")
+        if len(player.board) >= player.max_board:
+            raise ShopError(f"Доска полна ({len(player.board)}/{player.max_board})")
         name = player.reserve.pop(idx)
         star = 1
         if "★" in name:
