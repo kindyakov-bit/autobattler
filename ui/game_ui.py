@@ -1469,7 +1469,7 @@ class GameUI:
                                                 # Добавим на поле с координатами
                                                 new_unit = {
                                                     "name": unit_name,
-                                                    "star": 1,
+                                                    "star": int(unit_name.split("★")[1]) if "★" in unit_name else 1,
                                                     "row": click_r,
                                                     "col": click_c,
                                                 }
@@ -1516,7 +1516,7 @@ class GameUI:
                                             player.reserve.pop(bench_idx)
                                             new_unit = {
                                                 "name": unit_name,
-                                                "star": 1,
+                                                "star": int(unit_name.split("★")[1]) if "★" in unit_name else 1,
                                                 "row": click_r,
                                                 "col": click_c,
                                             }
