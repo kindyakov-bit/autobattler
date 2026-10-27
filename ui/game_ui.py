@@ -563,6 +563,81 @@ class GameUI:
         rect = surf.get_rect(center=(self.width // 2, self.height // 2))
         self.screen.blit(surf, rect)
 
+    def draw_battle_stats(self, state):
+        """Draw detailed post-battle statistics: damage, kills, stars."""
+        overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 160))
+        self.screen.blit(overlay, (0, 0))
+
+        cx = self.width // 2
+        y = self.height // 2 - 110
+
+        # Заголовок
+        title = self.font_large.render("ИТОГ БОЯ", True, (255, 215, 0))
+        self.screen.blit(title, title.get_rect(center=(cx, y)))
+        y += 35
+
+        # Урон и киллы по командам
+        dmg = state.get("dmg_by_team", {})
+        kills = state.get("kills_by_team", {})
+
+        # Определяем имена команд из ключей (player/enemy или bot1/bot2)
+        teams = list(dmg.keys())
+        if len(teams) >= 2:
+            t1, t2 = teams[0], teams[1]
+        else:
+            t1, t2 = "player", "enemy"
+
+        t1_dmg = dmg.get(t1, 0)
+        t2_dmg = dmg.get(t2, 0)
+        t1_k = kills.get(t1, 0)
+        t2_k = kills.get(t2, 0)
+
+        # Русифицируем названия команд для отображения
+        t1_label = "Игрок" if t1 == "player" else t1
+        t2_label = "Враг" if t2 == "enemy" else t2
+
+        line = f"Урон:  {t1_label} {t1_dmg}   {t2_label} {t2_dmg}"
+        surf = self.font_small.render(line, True, (200, 200, 200))
+        self.screen.blit(surf, surf.get_rect(center=(cx, y)))
+        y += 22
+
+        line = f"Киллы: {t1_label} {t1_k}   {t2_label} {t2_k}"
+        surf = self.font_small.render(line, True, (200, 200, 200))
+        self.screen.blit(surf, surf.get_rect(center=(cx, y)))
+        y += 35
+
+        # Топ по урону
+        top_d = state.get("top_damage", [])
+        if top_d:
+            surf = self.font_small.render("Топ урона:", True, (255, 215, 0))
+            self.screen.blit(surf, (cx - 150, y))
+            y += 22
+            for name, dmg_val, team, star in top_d:
+                star_str = "★" * star if star > 1 else ""
+                line = f"  {name}{star_str}  {dmg_val}"
+                surf = self.font_tiny.render(line, True, (180, 180, 180))
+                self.screen.blit(surf, (cx - 150, y))
+                y += 18
+            y += 12
+
+        # Топ по киллам
+        top_k = state.get("top_kills", [])
+        if top_k:
+            surf = self.font_small.render("Топ киллов:", True, (255, 215, 0))
+            self.screen.blit(surf, (cx - 150, y))
+            y += 22
+            for name, k, team, star in top_k:
+                star_str = "★" * star if star > 1 else ""
+                line = f"  {name}{star_str}  {k}x"
+                surf = self.font_tiny.render(line, True, (180, 180, 180))
+                self.screen.blit(surf, (cx - 150, y))
+                y += 18
+
+        # Подсказка
+        hint = self.font_tiny.render("Клик или клавиша — продолжить", True, (120, 120, 120))
+        self.screen.blit(hint, hint.get_rect(center=(cx, self.height - 40)))
+
     def draw_controls(self):
         """Draw control hints at bottom."""
         text = "SPACE=Pause  +/-=Speed  ESC=Quit"
@@ -2420,6 +2495,46 @@ class GameUI:
             hp = econ["hp_after"]
             eliminated = econ["is_eliminated"]
 
+            # ── Детальная статистика боя ───────────────────────────────────
+            # Урон, киллы и топ юнитов из sim.log
+            dmg_by_team = {}
+            kills_by_team = {}
+            dmg_by_unit = {}   # attacker_id -> damage
+            kills_by_unit = {} # attacker_id -> kills
+            unit_names = {}    # unit_id -> (name, team, star)
+            for team_name, units in sim.teams.items():
+                dmg_by_team[team_name] = 0
+                kills_by_team[team_name] = 0
+                for u in units:
+                    unit_names[u.unit_id] = (u.name, team_name, getattr(u, "star", 1))
+
+            for e in sim.log:
+                etype = e.get("type")
+                if etype in ("hit", "ability_hit"):
+                    dmg = e.get("damage", 0)
+                    attacker_id = e.get("attacker_id")
+                    if attacker_id in unit_names:
+                        _, team, _ = unit_names[attacker_id]
+                        dmg_by_team[team] = dmg_by_team.get(team, 0) + dmg
+                        dmg_by_unit[attacker_id] = dmg_by_unit.get(attacker_id, 0) + dmg
+                elif etype == "kill":
+                    attacker_id = e.get("attacker_id")
+                    killer_team = e.get("killer_team")
+                    if killer_team in kills_by_team:
+                        kills_by_team[killer_team] += 1
+                    if attacker_id in unit_names:
+                        kills_by_unit[attacker_id] = kills_by_unit.get(attacker_id, 0) + 1
+
+            # Топ по урону и киллам
+            top_damage = sorted(
+                ((unit_names[uid][0], dmg, unit_names[uid][1], unit_names[uid][2])
+                 for uid, dmg in dmg_by_unit.items()),
+                key=lambda x: x[1], reverse=True)[:3]
+            top_kills = sorted(
+                ((unit_names[uid][0], k, unit_names[uid][1], unit_names[uid][2])
+                 for uid, k in kills_by_unit.items()),
+                key=lambda x: x[1], reverse=True)[:3]
+
             state = {
                 "round_number": round_num,
                 "is_creep": is_creep,
@@ -2432,6 +2547,11 @@ class GameUI:
                 "eliminated": eliminated,
                 "battle_result": battle_result,
                 "total_ticks": total_ticks,
+                # Детальная статистика
+                "dmg_by_team": dmg_by_team,
+                "kills_by_team": kills_by_team,
+                "top_damage": top_damage,
+                "top_kills": top_kills,
             }
             history.append(state)
             all_sims[round_num] = sim
@@ -2463,6 +2583,10 @@ class GameUI:
                         break  # клик или клавиша пропускают паузу
                 else:
                     self.clock.tick(30)
+                    # Рисуем статистику боя поверх анимации
+                    self.screen.fill(BG_COLOR)
+                    self.draw_battle_stats(state)
+                    pygame.display.flip()
                     continue
                 break
 
@@ -2491,6 +2615,29 @@ class GameUI:
             True, (200, 200, 200))
         r = summary_surf.get_rect(center=(self.width // 2, self.height // 2 + 50))
         self.screen.blit(summary_surf, r)
+
+        # Итоговая статистика по всему матчу
+        # Определяем имя команды игрока из первого состояния
+        player_team = "player"
+        if history:
+            for t in history[0].get("dmg_by_team", {}):
+                if t != "enemy":
+                    player_team = t
+                    break
+
+        total_dmg = sum(s.get("dmg_by_team", {}).get(player_team, 0) for s in history)
+        total_kills = sum(s.get("kills_by_team", {}).get(player_team, 0) for s in history)
+        total_gold_earned = sum(s.get("gold_earned", 0) for s in history)
+        total_kill_gold = sum(s.get("kill_gold", 0) for s in history)
+
+        stats_lines = [
+            f"Всего урона: {total_dmg}   |   Всего киллов: {total_kills}",
+            f"Золота за раунды: {total_gold_earned}   |   Золота за киллы: {total_kill_gold}",
+        ]
+        for i, line in enumerate(stats_lines):
+            surf = self.font_tiny.render(line, True, (180, 180, 180))
+            r = surf.get_rect(center=(self.width // 2, self.height // 2 + 80 + i * 20))
+            self.screen.blit(surf, r)
         
         restart_surf = self.font_tiny.render("Press ESC to quit", True, (150, 150, 150))
         r = restart_surf.get_rect(center=(self.width // 2, self.height - 40))
@@ -2676,6 +2823,44 @@ class GameUI:
             hp1 = econ1["hp_after"]
             hp2 = econ2["hp_after"]
 
+            # ── Детальная статистика боя (бот vs бот) ──────────────────────
+            dmg_by_team = {}
+            kills_by_team = {}
+            dmg_by_unit = {}
+            kills_by_unit = {}
+            unit_names = {}
+            for team_name, units in sim.teams.items():
+                dmg_by_team[team_name] = 0
+                kills_by_team[team_name] = 0
+                for u in units:
+                    unit_names[u.unit_id] = (u.name, team_name, getattr(u, "star", 1))
+
+            for e in sim.log:
+                etype = e.get("type")
+                if etype in ("hit", "ability_hit"):
+                    dmg = e.get("damage", 0)
+                    attacker_id = e.get("attacker_id")
+                    if attacker_id in unit_names:
+                        _, team, _ = unit_names[attacker_id]
+                        dmg_by_team[team] = dmg_by_team.get(team, 0) + dmg
+                        dmg_by_unit[attacker_id] = dmg_by_unit.get(attacker_id, 0) + dmg
+                elif etype == "kill":
+                    attacker_id = e.get("attacker_id")
+                    killer_team = e.get("killer_team")
+                    if killer_team in kills_by_team:
+                        kills_by_team[killer_team] += 1
+                    if attacker_id in unit_names:
+                        kills_by_unit[attacker_id] = kills_by_unit.get(attacker_id, 0) + 1
+
+            top_damage = sorted(
+                ((unit_names[uid][0], dmg, unit_names[uid][1], unit_names[uid][2])
+                 for uid, dmg in dmg_by_unit.items()),
+                key=lambda x: x[1], reverse=True)[:3]
+            top_kills = sorted(
+                ((unit_names[uid][0], k, unit_names[uid][1], unit_names[uid][2])
+                 for uid, k in kills_by_unit.items()),
+                key=lambda x: x[1], reverse=True)[:3]
+
             history.append({
                 "round": round_num,
                 "is_creep": is_creep,
@@ -2687,6 +2872,10 @@ class GameUI:
                 "bot2_gold": gold2,
                 "bot1_hp": hp1,
                 "bot2_hp": hp2,
+                "dmg_by_team": dmg_by_team,
+                "kills_by_team": kills_by_team,
+                "top_damage": top_damage,
+                "top_kills": top_kills,
             })
 
             if hp1 <= 0 or hp2 <= 0:
