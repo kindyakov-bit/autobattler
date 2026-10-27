@@ -1114,7 +1114,12 @@ class GameUI:
                 
                 # Start with base stats + star bonuses
                 unit_data = {
-                    "name": name_base,
+                    # Имя с ★N: display_name в бою покажет звёзды, а
+                    # restore следующего раунда прочитает star из поля.
+                    # Раньше сюда писался чистый ключ и star вообще не
+                    # сохранялся — скауты теряли звёзды каждый раунд.
+                    "name": f"{name_base}★{star}" if star > 1 else name_base,
+                    "star": star,
                     "hp": int(ud["hp"] * hp_mult),
                     "damage": int(ud["damage"] * dmg_mult),
                     "attack_speed": ud["attack_speed"],
