@@ -1248,15 +1248,17 @@ class GameUI:
                 # Повторение '★★' без цифры звёздность теряет.
                 if star > 1 and "★" not in name:
                     name = f"{name}★{star}"
-                # Восстанавливаем юнта на доске с его позицией на тактическом поле.
-                # row/col хранятся на верхнем уровне unit_data, а не внутри stats.
                 name_base = name.split("★")[0]
                 unit_data = {"name": name, "star": star}
                 if u.get("row") is not None:
                     unit_data["row"] = u.get("row")
                 if u.get("col") is not None:
                     unit_data["col"] = u.get("col")
-                if len(player.board) < 6:
+                # Если у юнита нет позиции на поле (row/col = None) — он был
+                # на скамейке, возвращаем его туда, а не на доску.
+                if u.get("row") is None or u.get("col") is None:
+                    player.reserve.append(name)
+                elif len(player.board) < 6:
                     player.board.append(unit_data)
                     # Переносим базовые статы, чтобы предметы и бонусы применялись корректно
                     idx = len(player.board) - 1
@@ -1529,15 +1531,18 @@ class GameUI:
                                                 except Exception:
                                                     pass
                                             else:
-                                                # Начать перетаскивание юнта с клетки поля на другую клетку
-                                                self.drag_board_idx = unit_idx
-                                                self.drag_board_orig = (unit_on_cell.get("row"),
-                                                                       unit_on_cell.get("col"))
-                                                self.drag_board_data = dict(unit_on_cell)
-                                                # Временно убираем с поля (вернём в MOUSEBUTTONUP, если клетка занята)
-                                                player.board.pop(unit_idx)
-                                                self.play_sound("click")
+                                                # Убрать юнита с поля на скамейку (если есть место)
+                                                if len(player.reserve) < player.max_bench:
+                                                    player.board.pop(unit_idx)
+                                                    player.reserve.append(unit_on_cell["name"])
+                                                    self.play_sound("click")
+                                                # Иначе — скамейка pleine, не убираем
                                             self.selected_bench_idx = None
+                                            self.selected_shop_idx = None
+                                            self.selected_field_cell = None
+                                            self.drag_board_idx = None
+                                            self.drag_board_orig = None
+                                            self.drag_board_data = None
                                             self.selected_shop_idx = None
                                             self.selected_field_cell = None
                                         else:
@@ -1747,6 +1752,29 @@ class GameUI:
                     unit_data["item_bonuses"] = unit["item_bonuses"]
 
                 player_units.append(unit_data)
+
+        # Также добавляем юнитов со скамейки, чтобы они не исчезали между раундами
+        for bench_unit_name in player.reserve:
+            name_base = bench_unit_name.split("★")[0]
+            if name_base in all_units:
+                ud = all_units[name_base]
+                star = int(bench_unit_name.split("★")[1]) if "★" in bench_unit_name else 1
+                hp_mult = 1.5 if star == 2 else 2.0 if star == 3 else 1.0
+                dmg_mult = 1.5 if star == 2 else 2.0 if star == 3 else 1.0
+                player_units.append({
+                    "name": f"{name_base}★{star}" if star > 1 else name_base,
+                    "star": star,
+                    "hp": int(ud["hp"] * hp_mult),
+                    "damage": int(ud["damage"] * dmg_mult),
+                    "attack_speed": ud["attack_speed"],
+                    "range_": ud["range"],
+                    "class": ud["class"],
+                    "race": ud.get("race", "human"),
+                    "crit_chance": ud.get("crit_chance", 0),
+                    # На скамейке нет позиции на поле
+                    "row": None,
+                    "col": None,
+                })
 
         if not player_units:
             player_units = [

@@ -127,7 +127,7 @@ def draw_item_icon(surf, cx, cy, size, item_type):
 
 
 def draw_tooltip(surf, x, y, text, font=None):
-    """Рисует подсказку с текстом в точке (x, y)."""
+    """Рисует подсказку с текстом в точке (x, y), проверяя границы экрана."""
     font = font or pygame.font.Font(None, 16)
     lines = text.split("\n")
     pads = 6
@@ -137,6 +137,19 @@ def draw_tooltip(surf, x, y, text, font=None):
     bg = pygame.Surface((w, h), pygame.SRCALPHA)
     bg.fill((30, 30, 40, 230))
     pygame.draw.rect(bg, (200, 200, 100), (0, 0, w, h), width=1, border_radius=4)
+
+    # Проверяем границы экрана — не уходим за правый и нижний край
+    screen_w = surf.get_width()
+    screen_h = surf.get_height()
+    if x + w > screen_w:
+        x = screen_w - w - 4
+    if x < 0:
+        x = 4
+    if y + h > screen_h:
+        y = screen_h - h - 4
+    if y < 0:
+        y = 4
+
     surf.blit(bg, (x, y))
     for i, line in enumerate(lines):
         t = font.render(line, True, (255, 255, 255))
