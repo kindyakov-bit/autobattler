@@ -88,7 +88,7 @@ class TestBotFactory:
         for preset_name in BOT_PRESETS:
             bot = create_bot(preset=preset_name)
             assert isinstance(bot, SimpleBot)
-            assert bot.difficulty in ("EASY", "MEDIUM", "HARD")
+            assert bot.difficulty in ("EASY", "MEDIUM", "HARD", "SAVER", "SYNERGY_FOCUS", "RANDOM")
 
     def test_create_bot_with_seed(self):
         """Бот с seed создаётся корректно."""

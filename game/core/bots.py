@@ -37,8 +37,17 @@ class SimpleBot:
             return self._easy_draft(available_units, gold)
         elif self.difficulty == "MEDIUM":
             return self._medium_draft(available_units, gold, current_team, synergy_data)
-        else:  # HARD
+        elif self.difficulty == "HARD":
             return self._hard_draft(available_units, gold, current_team, synergy_data)
+        elif self.difficulty == "SAVER":
+            return self._saver_draft(available_units, gold)
+        elif self.difficulty == "SYNERGY_FOCUS":
+            return self._synergy_focus_draft(
+                available_units, gold, current_team, synergy_data)
+        elif self.difficulty == "RANDOM":
+            return self._random_draft(available_units, gold)
+        else:
+            return self._easy_draft(available_units, gold)
 
     # ── общая механика покупки ─────────────────────────────────────────────
 
@@ -139,12 +148,89 @@ class SimpleBot:
         """Get current team composition."""
         return list(self.units_on_board)
 
+    # ── новые стили ботов ──────────────────────────────────────────────────
+
+    def _saver_draft(self, available_units: dict, gold: int) -> list[dict]:
+        """Экономичный бот: не тратит золото рано, копит на прокадку магазина.
+
+        Покупает только самых дешёвых юнитов (cost 1), оставляет резерв
+        золота для будущих раундов. В поздней игре может позволить себе
+        дорогих юнитов.
+        """
+        cheap = [(k, u) for k, u in available_units.items()
+                 if u.get("cost", 1) <= 1]
+        cheap.sort(key=lambda kv: kv[1].get("cost", 1))
+        # Тратим не больше половины золота, копим остальное
+        budget = gold // 2
+        return self._buy_loop(cheap, budget)
+
+    def _synergy_focus_draft(self, available_units: dict, gold: int,
+                             current_team: list[dict],
+                             synergy_data: dict) -> list[dict]:
+        """Синергийный бот: агрессивно собирает одного класса до порога 4.
+
+        Выбирает класс с наибольшим количеством уже имеющихся юнитов и
+        докупает его же, чтобы быстро закрыть пороги синергии 2 и 4.
+        """
+        class_counts = {}
+        for u in current_team:
+            cls = u.get("class")
+            if cls:
+                class_counts[cls] = class_counts.get(cls, 0) + 1
+
+        if not class_counts:
+            # Первый раунд — выбираем класс с самыми дешёвыми юнитами
+            best_class = None
+            best_price = float('inf')
+            for syn_name, syn_info in synergy_data.items():
+                units_of_class = [(k, u) for k, u in available_units.items()
+                                  if u.get("class") == syn_name]
+                if not units_of_class:
+                    continue
+                price = min(u.get("cost", 1) for _, u in units_of_class)
+                if price < best_price:
+                    best_price = price
+                    best_class = syn_name
+            target_class = best_class or "warrior"
+        else:
+            # Добираем класс, которого уже больше всего
+            target_class = max(class_counts, key=class_counts.get)
+
+        same = [(k, u) for k, u in available_units.items()
+                if u.get("class") == target_class]
+        other = [(k, u) for k, u in available_units.items()
+                 if u.get("class") != target_class]
+        same.sort(key=lambda kv: kv[1].get("cost", 1))
+        other.sort(key=lambda kv: kv[1].get("cost", 1))
+        # Сначала своёicho, потом остальные на оставшиеся деньги
+        return self._buy_loop(same + other, gold)
+
+    def _random_draft(self, available_units: dict, gold: int) -> list[dict]:
+        """Случайный бот: покупает случайных юнитов в рамках бюджета."""
+        units = list(available_units.items())
+        self.rng.shuffle(units)
+        units.sort(key=lambda kv: kv[1].get("cost", 1))
+        return self._buy_loop(units, gold)
+
 
 BOT_PRESETS = {
-    "aggressive": {"name": "Aggressive", "difficulty": "HARD"},
-    "balanced":   {"name": "Balanced",   "difficulty": "MEDIUM"},
-    "casual":     {"name": "Casual",     "difficulty": "EASY"},
+    "aggressive":   {"name": "Aggressive",   "difficulty": "HARD"},
+    "balanced":     {"name": "Balanced",     "difficulty": "MEDIUM"},
+    "casual":       {"name": "Casual",       "difficulty": "EASY"},
+    "saver":        {"name": "Saver",        "difficulty": "SAVER"},
+    "synergy_focus":{"name": "Synergy Focus","difficulty": "SYNERGY_FOCUS"},
+    "random":       {"name": "Random",       "difficulty": "RANDOM"},
 }
+
+
+def create_bot(preset: str = "balanced", seed: int = None) -> SimpleBot:
+    """Create a bot from preset."""
+    config = BOT_PRESETS.get(preset, BOT_PRESETS["balanced"])
+    return SimpleBot(
+        name=config["name"],
+        difficulty=config["difficulty"],
+        seed=seed,
+    )
 
 
 def create_bot(preset: str = "balanced", seed: int = None) -> SimpleBot:
