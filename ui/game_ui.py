@@ -14,6 +14,7 @@ import time
 import pygame
 import sys
 from pathlib import Path
+from ui.sprites import draw_unit_sprite, draw_item_icon, draw_tooltip
 
 _PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 if str(_PROJECT_ROOT) not in sys.path:
@@ -22,12 +23,12 @@ if str(_PROJECT_ROOT) not in sys.path:
 # ── Раскладка фазы драфта (одна True на отрисовку и на клики мышью) ──────────
 # Хитбоксы и рисование обязаны использовать одни и те же числа, иначе
 # «невидимые» слоты остаются кликабельными, а видимые — нет.
-SHOP_X0, SHOP_Y0, SHOP_W, SHOP_H, SHOP_STEP = 20, 85, 100, 95, 110
+SHOP_X0, SHOP_Y0, SHOP_W, SHOP_H, SHOP_STEP = 20, 85, 95, 105, 100
 
-BENCH_X0, BENCH_Y0, BENCH_W, BENCH_H = 20, 235, 85, 26
+BENCH_X0, BENCH_Y0, BENCH_W, BENCH_H = 20, 268, 85, 26
 BENCH_COLS, BENCH_ROW_H, BENCH_MAX = 5, 32, 10
 
-BOARD_X0, BOARD_Y0, BOARD_W, BOARD_H = 20, 240, 85, 30   # BOARD_X0 += width // 3
+BOARD_X0, BOARD_Y0, BOARD_W, BOARD_H = 20, 268, 85, 30   # BOARD_X0 += width // 3
 BOARD_COLS, BOARD_ROW_H = 3, 35
 
 # Цвет рамки по цене юнита — как в TFT/Underlords: сразу видно, что дорого.
@@ -319,6 +320,16 @@ class GameUI:
         self.shake = 0                # текущая сила тряски в пикселях
         self.shake_rng = random.Random(1234)   # свой RNG, чтобы не жевать seed боя
         self.battle_surface = None    # для тряски рисуем бой на отдельный слой
+        # Мышь в драфте
+        self.hover_shop_idx = None
+        self.hover_item_idx = None
+        self.selected_item_idx = None  # предмет, выбранный для применения к юниту
+        self.lvl_icon_rect = None      # rect иконки уровня магазина (для клика мышью)
+        self.selected_field_cell = None  # (row, col) выбранная клетка тактического поля
+        self.drag_bench_idx = None  # индекс юнита наベンче, которого тащим
+        self.drag_board_idx = None  # индекс юнита на доске, которого тащим с клетки на клетку
+        self.drag_board_orig = None  # исходная (row, col) для возврата, если клетка занята
+        self.drag_board_data = None  # данные юнта (имя, звезда, статы) при драге с поля
 
     def rng_shake(self) -> float:
         """Случайное число 0..1 для тряски."""
@@ -414,12 +425,14 @@ class GameUI:
 
     def draw_unit(self, unit_dict, x, y, team_color, target=None,
                   ability_name=None, ability_cooldown=0, ability_cooldown_max=0,
-                  tier_color=None):
+                  tier_color=None, unit_class=None, star=1):
         """Draw a unit with HP bar and ability cooldown indicator.
 
         target=None рисует на главный экран (драфт, результаты);
         при тряске бой рисуется на отдельный слой.
         tier_color — цвет рамки по цене юнита (см. TIER_COLORS).
+        unit_class — класс юнита для процедурного силуэта (warrior/mage/archer).
+        star — звёздность 1..3 (рисуются звёздочки в углу).
         """
         surf = target if target is not None else self.screen
         name = unit_dict.get("name", "?")
@@ -427,9 +440,14 @@ class GameUI:
         max_hp = unit_dict.get("_base_hp", unit_dict.get("hp", 100))
 
         rect_w, rect_h = 140, 50
+        # Фон карточки — цвет команды
         pygame.draw.rect(surf, team_color, (x, y, rect_w, rect_h), border_radius=6)
-        pygame.draw.rect(surf, tier_color or (255, 255, 255),
-                         (x, y, rect_w, rect_h), width=1, border_radius=6)
+        # Процедурный силуэт юнита по классу + цвет тира + звёзды
+        cls = unit_class or unit_dict.get("class", "warrior")
+        draw_unit_sprite(
+            surf, x + 6, y + 8, rect_w - 12, rect_h - 20,
+            cls, tier_color=tier_color, star=star,
+        )
 
         # HP bar
         hp_pct = max(0, min(1.0, hp / max(max_hp, 1)) if max_hp > 0 else 0)
@@ -675,59 +693,163 @@ class GameUI:
         gold_surf = self.font_small.render(f"Gold: {gold}", True, (255, 215, 0))
         self.screen.blit(gold_surf, (self.width - 150, 8))
 
-        # ── SHOP section ────────────────────────────────────────────────
-        pygame.draw.rect(self.screen, (40, 60, 80), (10, 55, self.width - 20, 130), border_radius=8)
-        shop_title = self.font_small.render("SHOP — R=roll N=next", True, (200, 200, 200))
-        self.screen.blit(shop_title, (20, 65))
-
-        # Уровень магазина: от него зависит потолок цен в ролле.
-        # U = апгрейд за золото (цена растёт с уровнем)
-        lvl = getattr(shop, "level", 1) if shop is not None else 1
-        up_cost = shop.upgrade_cost if shop is not None else None
-        up_text = f"U=upgrade(${up_cost})" if up_cost else "U=max"
-        lvl_color = (255, 215, 0) if up_cost else (150, 200, 150)
-        lvl_surf = self.font_small.render(
-            f"Shop lvl {lvl}  {up_text}", True, lvl_color)
-        self.screen.blit(lvl_surf, (self.width - 280, 65))
-
+        # ── SHOP section (карточки с именем + силуэт + стоимость + звёзды + синергии) ──
+        mx, my = pygame.mouse.get_pos()
+        shop_y = 85
+        SHOP_H = 105
+        SHOP_W = 95
+        SHOP_STEP = 100
         item_x = SHOP_X0
         slot_color = (60, 80, 100)
-        for i, item in enumerate(shop_items[:10]):
+        max_shop_slots = min(len(shop_items), 10)
+
+        # Правая вертикальная панель: реролл + апгрейд уровня
+        right_panel_x = self.width - 130
+        right_panel_y = shop_y
+        right_panel_w = 115
+        right_panel_h = SHOP_H
+        pygame.draw.rect(self.screen, (40, 60, 80),
+                         (right_panel_x, right_panel_y, right_panel_w, right_panel_h), border_radius=6)
+
+        # Кнопка реролла магазина (клик мышью)
+        reroll_rect = pygame.Rect(right_panel_x + 10, right_panel_y + 8, right_panel_w - 20, 26)
+        hover_reroll = reroll_rect.collidepoint(mx, my)
+        pygame.draw.rect(self.screen, (80, 120, 160) if not hover_reroll else (120, 160, 200),
+                         reroll_rect, border_radius=4)
+        rr_surf = self.font_tiny.render("Reroll ($1)", True, (255, 255, 255))
+        self.screen.blit(rr_surf, rr_surf.get_rect(center=reroll_rect.center))
+        if hover_reroll:
+            draw_tooltip(self.screen, right_panel_x, right_panel_y + right_panel_h + 4,
+                         "Перебросить витрину магазина\nза 1 золото (клавиша R)", self.font_tiny)
+
+        # Уровень магазина: иконка + текст + клик по иконке — апгрейд за золото
+        if shop is not None:
+            lvl = shop.level
+            up_cost = shop.upgrade_cost
+            up_text = f"upgrade(${up_cost})" if up_cost else "max"
+            max_cost = shop.MAX_COST_BY_LEVEL.get(lvl, 1)
+            unit_candidates = [u for u, c in shop.unit_costs.items()
+                               if c <= max_cost and shop.pool.available(u) > 0]
+            unit_chance_pct = int(100 / len(unit_candidates)) if unit_candidates else 0
+            item_chance_pct = int(100 / len(shop.item_data)) if shop.item_data else 0
+        else:
+            lvl = 1
+            up_cost = None
+            up_text = "max"
+            unit_chance_pct = 0
+            item_chance_pct = 0
+
+        # Цвет иконки по шансу выпадения юнита текущего уровня
+        if up_cost is None:
+            lvl_color = (150, 200, 150)
+        elif unit_chance_pct >= 50:
+            lvl_color = (100, 220, 100)
+        elif unit_chance_pct >= 25:
+            lvl_color = (255, 220, 80)
+        else:
+            lvl_color = (220, 80, 80)
+
+        # Иконка уровня магазина — круг с цифрой (ниже кнопки реролла)
+        icon_r = 14
+        icon_cx = right_panel_x + right_panel_w // 2
+        icon_cy = right_panel_y + 68
+        self.lvl_icon_rect = pygame.Rect(icon_cx - icon_r, icon_cy - icon_r,
+                                         icon_r * 2, icon_r * 2)
+        hover_lvl = self.lvl_icon_rect.collidepoint(mx, my)
+        pygame.draw.circle(self.screen, lvl_color, (icon_cx, icon_cy), icon_r)
+        pygame.draw.circle(self.screen, (255, 255, 255), (icon_cx, icon_cy), icon_r, width=2)
+        lvl_digit = self.font_tiny.render(str(lvl), True, (30, 30, 40))
+        self.screen.blit(lvl_digit, lvl_digit.get_rect(center=(icon_cx, icon_cy)))
+
+        # Текст уровня под иконкой
+        lvl_text = self.font_tiny.render(f"lvl {lvl}", True, lvl_color)
+        self.screen.blit(lvl_text, lvl_text.get_rect(center=(icon_cx, icon_cy + 18)))
+        up_surf = self.font_tiny.render(up_text, True, (200, 200, 100))
+        self.screen.blit(up_surf, up_surf.get_rect(center=(icon_cx, icon_cy + 32)))
+
+        if hover_lvl:
+            tip = f"Уровень магазина {lvl}\nШанс юнита: {unit_chance_pct}%\n"
+            if up_cost is not None:
+                tip += f"Апгрейд: ${up_cost} (клик)\n"
+            else:
+                tip += "Макс. уровень\n"
+            tip += f"Шанс предмета: {item_chance_pct}%"
+            draw_tooltip(self.screen, right_panel_x, right_panel_y + right_panel_h + 4,
+                         tip, self.font_tiny)
+
+        # Карточки юнитов в витрине магазина
+        for i in range(max_shop_slots):
+            item = shop_items[i]
             x = item_x + i * SHOP_STEP
-            if x > self.width - 120:
-                break
-            color = slot_color
             name_key = item.get("name", "?")
-            # Показываем русское имя из units.json вместо английского ключа
             if not name_key.startswith("ITEM:"):
                 name = self.all_units.get(name_key, {}).get("name", name_key)
+                cls = self.all_units.get(name_key, {}).get("class", "warrior")
+                cost = self.all_units.get(name_key, {}).get("cost", 1)
             else:
-                name = name_key
-            cost = item.get("cost", 1)
+                name = name_key[len("ITEM:"):]
+                cls = None
+                cost = item.get("cost", 1)
 
-            # Подсветка выбранного shop item
+            # Наведение на shop slot
+            slot_rect = pygame.Rect(x, shop_y, SHOP_W, SHOP_H)
+            hovered = slot_rect.collidepoint(mx, my)
+            if hovered:
+                self.hover_shop_idx = i
+
             border_color = (255, 255, 100) if i == self.selected_shop_idx else (100, 150, 200)
             border_width = 3 if i == self.selected_shop_idx else 1
-            pygame.draw.rect(self.screen, color, (x, 85, 100, 95), border_radius=6)
-            pygame.draw.rect(self.screen, border_color, (x, 85, 100, 95), width=border_width, border_radius=6)
+            if hovered:
+                border_color = (255, 215, 0)
+                border_width = 2
+            pygame.draw.rect(self.screen, (60, 80, 100), slot_rect, border_radius=6)
+            pygame.draw.rect(self.screen, border_color, slot_rect, width=border_width, border_radius=6)
 
+            # Имя юнита над картинкой
             name_surf = self.font_tiny.render(
-                self.fit_text(name, SHOP_W - 10), True, (255, 255, 255))
-            self.screen.blit(name_surf, (x + 5, 90))
+                self.fit_text(name, SHOP_W - 6), True, (255, 255, 255))
+            self.screen.blit(name_surf, (x + 3, shop_y + 4))
 
+            # Силуэт юнита в центре карточки
+            if name_key.startswith("ITEM:"):
+                draw_item_icon(self.screen, x + SHOP_W // 2, shop_y + 42, 34,
+                               item.get("type", "accessory"))
+            else:
+                draw_unit_sprite(
+                    self.screen, x + 12, shop_y + 16, SHOP_W - 24, 46,
+                    cls, tier_color=self.tier_color(name), star=1,
+                )
+
+            # Стоимость в правом верхнем углу карточки
             cost_surf = self.font_tiny.render(f"${cost}", True, (255, 215, 0))
-            self.screen.blit(cost_surf, (x + 5, 110))
+            self.screen.blit(cost_surf, (x + SHOP_W - cost_surf.get_width() - 4,
+                                         shop_y + SHOP_H - 18))
 
-            # Рамка тира — сразу видно, что за юнит в слоте
-            if border_color != (255, 255, 100):
-                border_color = self.tier_color(name)
+            # Звёзды в правом верхнем углу карточки (над стоимостью)
+            star_y = shop_y + SHOP_H - 30
+            draw_unit_sprite(
+                self.screen, x + SHOP_W - 22, star_y, 18, 12,
+                cls, star=1,
+            )
 
-        # ── BENCH section ───────────────────────────────────────────────
-        pygame.draw.rect(self.screen, (30, 50, 70), (10, 195, self.width // 3 - 20, 180), border_radius=8)
+            # Tooltip при наведении
+            if hovered:
+                if name_key.startswith("ITEM:"):
+                    desc = item.get("description", "")
+                    tooltip = f"{name}\n${cost}  шанс: {item_chance_pct}%\n{desc}"
+                else:
+                    tooltip = f"{name}\n${cost}  шанс: {unit_chance_pct}%\nКласс: {cls}"
+                draw_tooltip(self.screen, x, shop_y + SHOP_H + 18, tooltip, self.font_tiny)
+
+        # ── BENCH section (юниты в запасе, внизу) ──
+        pygame.draw.rect(self.screen, (30, 50, 70), (10, BENCH_Y0, self.width // 3 - 20, 180), border_radius=8)
         bench_title = self.font_small.render(f"BENCH ({len(player.reserve)}) — D=place", True, (200, 200, 200))
-        self.screen.blit(bench_title, (20, 205))
+        self.screen.blit(bench_title, (20, BENCH_Y0 + 8))
 
         for i, unit_name in enumerate(player.reserve[:BENCH_MAX]):
+            # Пропускаем юнт, которого сейчас тащат (рисуем его под курсором)
+            if i == self.drag_bench_idx:
+                continue
             x = BENCH_X0 + (i % BENCH_COLS) * ((self.width // 3 - 40) // BENCH_COLS)
             y = BENCH_Y0 + (i // BENCH_COLS) * BENCH_ROW_H
             # Переводим английский ключ на русское имя
@@ -743,55 +865,143 @@ class GameUI:
             border_width = 3 if i == self.selected_bench_idx else 1
             pygame.draw.rect(self.screen, slot_color, (x, y, BENCH_W, BENCH_H), border_radius=4)
             pygame.draw.rect(self.screen, border_color, (x, y, BENCH_W, BENCH_H), width=border_width, border_radius=4)
+            # Силуэт юнита наベンче
+            ud = self.all_units.get(base, {})
+            draw_unit_sprite(
+                self.screen, x + 4, y + 2, 24, 14,
+                ud.get("class", "warrior"),
+                tier_color=border_color,
+                star=int(unit_name.split("★")[1]) if "★" in unit_name else 1,
+            )
             name_surf = self.font_micro.render(
                 self.fit_text(display_name, BENCH_W - 8, self.font_micro),
                 True, (255, 255, 255))
-            self.screen.blit(name_surf, (x + 3, y + 4))
+            self.screen.blit(name_surf, (x + 3, y + 18))
 
-        # ── BOARD section ───────────────────────────────────────────────
-        pygame.draw.rect(self.screen, (40, 70, 40), (self.width // 3 + 10, 195, self.width // 3 - 20, 180), border_radius=8)
-        board_title = self.font_small.render(f"BOARD ({len(player.board)}/6) — F=remove", True, (200, 200, 200))
-        self.screen.blit(board_title, (self.width // 3 + 20, 205))
+        # ── BOARD section — тактическое поле 5×5 ──
+        field_x0 = self.width // 3 + 10
+        field_y0 = BOARD_Y0
+        field_w = max(BOARD_W * 5, self.width // 3 - 20)  # минимум 5 слотов по BOARD_W
+        field_h = max(BOARD_H * 6, 180)                    # минимум 6 слотов по BOARD_H
+        cell_w = field_w // 5
+        cell_h = field_h // 5
 
-        for i, unit in enumerate(player.board[:6]):
-            x = BOARD_X0 + self.width // 3 + (i % BOARD_COLS) * (
-                (self.width // 3 - 40) // BOARD_COLS)
-            y = BOARD_Y0 + (i // BOARD_COLS) * BOARD_ROW_H
+        pygame.draw.rect(self.screen, (40, 70, 40),
+                         (field_x0, field_y0, field_w, field_h), border_radius=8)
+        board_title = self.font_small.render(
+            f"ПОЛЕ 5×5 ({len(player.board)}/6) — клик: поставить/убрать",
+            True, (200, 200, 200))
+        self.screen.blit(board_title, (field_x0 + 5, field_y0 + 5))
 
-            # Переводим английский ключ на русское имя (до использования!)
-            unit_name = unit.get("name", "?")
+        mx, my = pygame.mouse.get_pos()
+
+        # Карта занятости клеток: (row, col) -> unit
+        occupied = {}
+        for unit in player.board:
+            r = unit.get("row")
+            c = unit.get("col")
+            if r is not None and c is not None:
+                occupied[(r, c)] = unit
+
+        for r in range(5):
+            for c in range(5):
+                cx = field_x0 + c * cell_w + 2
+                cy = field_y0 + 30 + r * cell_h + 2
+                cw = cell_w - 4
+                ch = cell_h - 4
+                cell_rect = pygame.Rect(cx, cy, cw, ch)
+                hovered = cell_rect.collidepoint(mx, my)
+
+                unit = occupied.get((r, c))
+                if unit:
+                    # Юнит стоит на клетке
+                    border_color = (255, 255, 100) \
+                        if (r, c) == self.selected_field_cell else (100, 200, 100)
+                    pygame.draw.rect(self.screen, (60, 100, 60),
+                                     cell_rect, border_radius=3)
+                    pygame.draw.rect(self.screen, border_color,
+                                     cell_rect, width=2, border_radius=3)
+
+                    base = unit["name"].split("★")[0]
+                    ud = self.all_units.get(base, {})
+                    draw_unit_sprite(
+                        self.screen, cx + 4, cy + 2, 28, 18,
+                        ud.get("class", "warrior"),
+                        tier_color=self.tier_color(unit.get("name", "?")),
+                        star=unit.get("star", 1),
+                    )
+                    name_surf = self.font_micro.render(
+                        self.fit_text(ud.get("name", base), cw - 8, self.font_micro),
+                        True, (255, 255, 255))
+                    self.screen.blit(name_surf, (cx + 4, cy + 20))
+                else:
+                    # Пустая клетка
+                    border_color = (80, 100, 80) if not hovered else (120, 150, 120)
+                    if (r, c) == self.selected_field_cell:
+                        border_color = (255, 255, 100)
+                    pygame.draw.rect(self.screen, (30, 50, 30),
+                                     cell_rect, border_radius=3)
+                    pygame.draw.rect(self.screen, border_color,
+                                     cell_rect, width=1, border_radius=3)
+
+        # Подсказка под полем
+        hint_surf = self.font_tiny.render(
+            "Выберите юнта на бенче, затем клик по клетке поля",
+            True, (150, 150, 150))
+        self.screen.blit(hint_surf, (field_x0 + 5, field_y0 + field_h - 16))
+
+        # Отрисовываем тащущегося юнита поверх всего (драг энд дроп)
+        if self.drag_bench_idx is not None and self.drag_bench_idx < len(player.reserve):
+            mx, my = pygame.mouse.get_pos()
+            unit_name = player.reserve[self.drag_bench_idx]
             base = unit_name.split("★")[0]
-            ru_name = self.all_units.get(base, {}).get("name", base)
-            display_name = ru_name + self.star_suffix(unit_name)
+            ud = self.all_units.get(base, {})
+            draw_unit_sprite(
+                self.screen, mx - 14, my - 9,
+                28, 18,
+                ud.get("class", "warrior"),
+                tier_color=self.tier_color(unit_name),
+                star=int(unit_name.split("★")[1]) if "★" in unit_name else 1,
+            )
 
-            # Подсветка board slot (при наведении)
-            if self.selected_bench_idx is None and self.selected_shop_idx is None:
-                border_color = (255, 255, 100)
-            else:
-                border_color = self.tier_color(display_name)
-            border_width = 2
-            pygame.draw.rect(self.screen, slot_color, (x, y, BOARD_W, BOARD_H), border_radius=4)
-            pygame.draw.rect(self.screen, border_color, (x, y, BOARD_W, BOARD_H), width=border_width, border_radius=4)
-            name_surf = self.font_micro.render(
-                self.fit_text(display_name, BOARD_W - 8, self.font_micro),
-                True, (255, 255, 255))
-            self.screen.blit(name_surf, (x + 3, y + 4))
+        # Отрисовываем тащущегося юнита с поля на новую клетку
+        if self.drag_board_idx is not None and self.drag_board_data is not None:
+            mx, my = pygame.mouse.get_pos()
+            unit_name = self.drag_board_data.get("name", "?")
+            base = unit_name.split("★")[0]
+            ud = self.all_units.get(base, {})
+            draw_unit_sprite(
+                self.screen, mx - 14, my - 9,
+                28, 18,
+                ud.get("class", "warrior"),
+                tier_color=self.tier_color(unit_name),
+                star=int(unit_name.split("★")[1]) if "★" in unit_name else 1,
+            )
 
         # ── Synergy info ────────────────────────────────────────────────
         syn_x = self.width // 3 * 2 + 10
         syn_title = self.font_small.render("SYNERGIES", True, (200, 200, 200))
-        self.screen.blit(syn_title, (syn_x, 205))
+        self.screen.blit(syn_title, (syn_x, BOARD_Y0 + 8))
         for idx, cls_name in enumerate(["warrior", "mage", "archer"]):
             count = player.get_synergy_count(cls_name)
             if count > 0:
                 syn_color = (100, 255, 100) if count >= 2 else (200, 200, 100)
                 syn_text = self.font_tiny.render(f"{cls_name}: {count}", True, syn_color)
-                self.screen.blit(syn_text, (syn_x, 225 + idx * 20))
+                self.screen.blit(syn_text, (syn_x, BOARD_Y0 + 21 + idx * 20))
 
         # ── Inventory ───────────────────────────────────────────────────
         # Раньше метод _draw_items_section() не вызывался нигде, поэтому
         # купленные предметы было не видно.
         self._draw_items_section(player.items)
+
+        # ── Кнопка начала раунда (клик мышью или Enter) ─────────────────
+        start_rect = pygame.Rect(self.width // 2 - 75, self.height - 90, 150, 30)
+        hover_start = start_rect.collidepoint(mx, my)
+        pygame.draw.rect(self.screen, (60, 140, 60) if not hover_start else (90, 180, 90),
+                         start_rect, border_radius=6)
+        pygame.draw.rect(self.screen, (200, 200, 100), start_rect, width=1, border_radius=6)
+        start_surf = self.font_small.render("Начать раунд (Enter)", True, (255, 255, 255))
+        self.screen.blit(start_surf, start_surf.get_rect(center=start_rect.center))
 
         # ── Controls hint ───────────────────────────────────────────────
         controls = "W=Buy  S=Sell  D=Place  F=Remove  R=Roll  I=Item  A=Apply  Enter=Done  |  Клик: шоп/бенч/доска"
@@ -802,36 +1012,49 @@ class GameUI:
         """Draw inventory section with items."""
         if not items:
             return
-        
+
         inv_x = self.width // 3 * 2 + 10
         inv_y = 260
+        mx, my = pygame.mouse.get_pos()
         pygame.draw.rect(self.screen, (50, 40, 70), (inv_x - 10, inv_y - 5, self.width // 3 - 30, len(items) * 35 + 20), border_radius=8)
-        
+
         inv_title = self.font_small.render("INVENTORY", True, (200, 150, 200))
         self.screen.blit(inv_title, (inv_x, inv_y))
         inv_y += 25
-        
+
         for i, item in enumerate(items[:4]):
             x = inv_x
             y = inv_y + i * 35
-            color = (80, 60, 100)
-            pygame.draw.rect(self.screen, color, (x, y, 100, 28), border_radius=4)
-            
-            # Item icon (colored square based on type)
-            item_type = item.get("type", "accessory")
-            if item_type == "armor":
-                icon_color = (150, 150, 150)
-            elif item_type == "weapon":
-                icon_color = (200, 50, 50)
-            elif item_type == "legendary":
-                icon_color = (255, 215, 0)
+            item_rect = pygame.Rect(x, y, 100, 28)
+            hovered = item_rect.collidepoint(mx, my)
+            if hovered:
+                self.hover_item_idx = i
+            # Фон предмета: выделенный или наведенный
+            if i == self.selected_item_idx:
+                bg_color = (140, 100, 180)
+            elif hovered:
+                bg_color = (110, 90, 130)
             else:
-                icon_color = (100, 150, 255)
-            
-            pygame.draw.rect(self.screen, icon_color, (x + 3, y + 3, 8, 22), border_radius=2)
-            
-            name_surf = self.font_tiny.render(item.get("name", "?"), True, (255, 255, 255))
-            self.screen.blit(name_surf, (x + 14, y + 4))
+                bg_color = (80, 60, 100)
+            pygame.draw.rect(self.screen, bg_color, item_rect, border_radius=4)
+
+            # Иконка предмета
+            item_type = item.get("type", "accessory")
+            draw_item_icon(self.screen, x + 14, y + 14, 24, item_type)
+            # Название без техпрефикса ITEM:
+            raw_name = item.get("name", "?")
+            name = raw_name[len("ITEM:"):] if raw_name.startswith("ITEM:") else raw_name
+            name_surf = self.font_tiny.render(name, True, (255, 255, 255))
+            self.screen.blit(name_surf, (x + 38, y + 4))
+
+            # Tooltip при наведении
+            if hovered:
+                stats = item.get("stats", {})
+                stat_text = ", ".join(f"{k}: {v}" for k, v in stats.items()) if stats else ""
+                tooltip = (f"{name}\n${item.get('cost', '?')}  {item_type}\n"
+                           f"{stat_text}\n{item.get('description', '')}\n"
+                           "Клик — выбрать, затем клик по юниту на доске")
+                draw_tooltip(self.screen, x, y + 34, tooltip, self.font_tiny)
 
     def _mixed_roll(self, shop, count=7, item_count=3):
         """Смешанный ролл: юниты + предметы."""
@@ -842,7 +1065,15 @@ class GameUI:
         except Exception:
             item_items = []
         
-        all_items = list(unit_items) + [{"name": f"ITEM:{i['name']}", "cost": i["cost"], "item_key": i.get("item_key", "")} for i in item_items]
+        all_items = list(unit_items) + [
+            {
+                "name": f"ITEM:{i['name']}",
+                "cost": i["cost"],
+                "item_key": i.get("item_key", ""),
+                "type": (getattr(self, "items_data", {}) or {}).get("items", {}).get(i.get("item_key", ""), {}).get("type", "accessory"),
+            }
+            for i in item_items
+        ]
         return all_items
 
     def _run_interactive_draft(self, round_num, is_creep, synergy_data, seed, existing_units=None):
@@ -863,6 +1094,7 @@ class GameUI:
 
         all_units = data["units"]
         unit_costs = {name: info["cost"] for name, info in all_units.items()}
+        self.items_data = items_data  # для типа предметов в _mixed_roll
 
         rng = random.Random(seed + round_num * 100)
         pool = Pool(unit_costs)
@@ -1017,72 +1249,272 @@ class GameUI:
                             except Exception:
                                 pass
 
+                elif event.type == pygame.MOUSEMOTION:
+                    pass  # позиция мыши берется напрямую при отрисовке
+
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     mx, my = event.pos
-                    # ── SHOP items ──
-                    for i, item in enumerate(shop_items[:10]):
-                        sx = SHOP_X0 + i * SHOP_STEP
-                        if sx > self.width - 120:
-                            break
-                        rect = pygame.Rect(sx, SHOP_Y0, SHOP_W, SHOP_H)
-                        if rect.collidepoint(mx, my):
-                            name = item.get("name", "")
-                            if name.startswith("ITEM:"):
-                                # Предмет
-                                item_key = item.get("item_key", "")
-                                try:
-                                    shop.buy_item(player, item_key)
-                                except Exception:
-                                    pass
-                            else:
-                                # Юнит
-                                try:
-                                    draft_phase.buy_unit(player, name)
-                                    self.play_sound("buy")
-                                except Exception:
-                                    pass
-                            self.selected_shop_idx = i
+                    # ── Кнопка реролла магазина (клик мышью) ──
+                    reroll_rect = pygame.Rect(self.width - 120, 93, 95, 26)
+                    if reroll_rect.collidepoint(mx, my):
+                        if player.gold >= 1:
+                            player.gold -= 1
+                            try:
+                                shop_items = self._mixed_roll(
+                                    shop, count=7, item_count=3)
+                                self.play_sound("click")
+                            except Exception:
+                                pass
+                        self.selected_shop_idx = None
+                        self.selected_bench_idx = None
+                        break
+                    # ── Иконка уровня магазина: клик — апгрейд за золото ──
+                    if (self.lvl_icon_rect
+                            and self.lvl_icon_rect.collidepoint(mx, my)
+                            and shop is not None):
+                        if shop.upgrade(player):
+                            self.shop_level = shop.level
+                            self.play_sound("gold")
+                            try:
+                                shop_items = self._mixed_roll(
+                                    shop, count=7, item_count=3)
+                            except Exception:
+                                pass
+                        self.selected_shop_idx = None
+                        self.selected_bench_idx = None
+                        break
+                    # ── Кнопка начала раунда ──
+                    start_rect = pygame.Rect(self.width // 2 - 75,
+                                             self.height - 90, 150, 30)
+                    if start_rect.collidepoint(mx, my):
+                        done_draft = True
+                        break
+                    # ── Инвентарь: выбрать предмет для применения к юниту ──
+                    inv_x = self.width // 3 * 2 + 10
+                    inv_y = 285  # 260 + 25 (заголовок)
+                    for i in range(min(len(player.items), 4)):
+                        item_rect = pygame.Rect(inv_x, inv_y + i * 35, 100, 28)
+                        if item_rect.collidepoint(mx, my):
+                            self.selected_item_idx = i \
+                                if self.selected_item_idx != i else None
+                            self.selected_shop_idx = None
                             self.selected_bench_idx = None
                             break
                     else:
-                        # ── BENCH ── (те же координаты, что и при отрисовке)
-                        cell_w = (self.width // 3 - 40) // BENCH_COLS
-                        for i in range(min(len(player.reserve), BENCH_MAX)):
-                            bx = BENCH_X0 + (i % BENCH_COLS) * cell_w
-                            by = BENCH_Y0 + (i // BENCH_COLS) * BENCH_ROW_H
-                            rect = pygame.Rect(bx, by, BENCH_W, BENCH_H)
+                        # ── SHOP items ──
+                        for i, item in enumerate(shop_items[:10]):
+                            sx = SHOP_X0 + i * SHOP_STEP
+                            if sx > self.width - 120:
+                                break
+                            rect = pygame.Rect(sx, SHOP_Y0, SHOP_W, SHOP_H)
                             if rect.collidepoint(mx, my):
-                                if len(player.board) < 6:
+                                name = item.get("name", "")
+                                if name.startswith("ITEM:"):
+                                    # Предмет
+                                    item_key = item.get("item_key", "")
                                     try:
-                                        draft_phase.place_on_board(player, i)
-                                        name_base = player.board[-1]["name"].split("★")[0]
-                                        if name_base in all_units:
-                                            ud = all_units[name_base]
-                                            unit = player.board[-1]
-                                            shop.set_base_stats(player, len(player.board) - 1,
-                                                                int(ud["hp"] * (1.5 if unit.get("star", 1) == 2 else 2.0 if unit.get("star", 1) == 3 else 1)),
-                                                                int(ud["damage"] * (1.5 if unit.get("star", 1) == 2 else 2.0 if unit.get("star", 1) == 3 else 1)),
-                                                                ud["attack_speed"])
+                                        shop.buy_item(player, item_key)
                                     except Exception:
                                         pass
-                                self.selected_bench_idx = i
-                                self.selected_shop_idx = None
+                                else:
+                                    # Юнит
+                                    try:
+                                        draft_phase.buy_unit(player, name)
+                                        self.play_sound("buy")
+                                    except Exception:
+                                        pass
+                                self.selected_shop_idx = i
+                                self.selected_bench_idx = None
                                 break
                         else:
-                            # ── BOARD ──
-                            cell_w2 = (self.width // 3 - 40) // BOARD_COLS
-                            for i in range(len(player.board)):
-                                cx = BOARD_X0 + self.width // 3 + (i % BOARD_COLS) * cell_w2
-                                cy = BOARD_Y0 + (i // BOARD_COLS) * BOARD_ROW_H
-                                rect = pygame.Rect(cx, cy, BOARD_W, BOARD_H)
+                            # ── BENCH — начать перетаскивание (драг энд дроп) ──
+                            bench_clicked = False
+                            cell_w = (self.width // 3 - 40) // BENCH_COLS
+                            for i in range(min(len(player.reserve), BENCH_MAX)):
+                                bx = BENCH_X0 + (i % BENCH_COLS) * cell_w
+                                by = BENCH_Y0 + (i // BENCH_COLS) * BENCH_ROW_H
+                                rect = pygame.Rect(bx, by, BENCH_W, BENCH_H)
                                 if rect.collidepoint(mx, my):
-                                    try:
-                                        draft_phase.remove_from_board(player, i)
-                                    except Exception:
-                                        pass
-                                    self.selected_bench_idx = None
+                                    self.drag_bench_idx = i
                                     self.selected_shop_idx = None
+                                    self.selected_field_cell = None
+                                    bench_clicked = True
                                     break
+                            if not bench_clicked:
+                                # ── Тактическое поле 5×5 ──
+                                field_x0 = self.width // 3 + 10
+                                field_y0 = BOARD_Y0
+                                field_w = self.width // 3 - 20
+                                field_h = 180
+                                cell_w = field_w // 5
+                                cell_h = field_h // 5
+
+                                # Пропускаем заголовок поля (первые 30 пикселей по Y)
+                                if my < field_y0 + 30:
+                                    pass
+                                else:
+                                    click_r = (my - field_y0 - 30) // cell_h
+                                    click_c = (mx - field_x0) // cell_w
+                                    if 0 <= click_r < 5 and 0 <= click_c < 5:
+                                        cell_key = (click_r, click_c)
+                                        # Найдём юнит на этой клетке
+                                        unit_on_cell = None
+                                        unit_idx = None
+                                        for i, u in enumerate(player.board):
+                                            if u.get("row") == click_r and u.get("col") == click_c:
+                                                unit_on_cell = u
+                                                unit_idx = i
+                                                break
+
+                                        if unit_on_cell is not None:
+                                            # На клетке есть юнит
+                                            if (self.selected_item_idx is not None
+                                                    and self.selected_item_idx < len(player.items)):
+                                                # Применить выбранный предмет к юниту
+                                                try:
+                                                    shop.apply_item_to_unit(
+                                                        player, self.selected_item_idx, unit_idx)
+                                                    self.play_sound("click")
+                                                    self.selected_item_idx = None
+                                                except Exception:
+                                                    pass
+                                            else:
+                                                # Начать перетаскивание юнта с клетки поля на другую клетку
+                                                self.drag_board_idx = unit_idx
+                                                self.drag_board_orig = (unit_on_cell.get("row"),
+                                                                       unit_on_cell.get("col"))
+                                                self.drag_board_data = dict(unit_on_cell)
+                                                # Временно убираем с поля (вернём в MOUSEBUTTONUP, если клетка занята)
+                                                player.board.pop(unit_idx)
+                                                self.play_sound("click")
+                                            self.selected_bench_idx = None
+                                            self.selected_shop_idx = None
+                                            self.selected_field_cell = None
+                                        else:
+                                            # Пустая клетка
+                                            if self.selected_bench_idx is not None \
+                                                    and self.selected_bench_idx < len(player.reserve):
+                                                # Поставить выбранного юнита с бенча на клетку
+                                                bench_idx = self.selected_bench_idx
+                                                unit_name = player.reserve[bench_idx]
+                                                # Удалим из бенча
+                                                player.reserve.pop(bench_idx)
+                                                # Добавим на поле с координатами
+                                                new_unit = {
+                                                    "name": unit_name,
+                                                    "star": 1,
+                                                    "row": click_r,
+                                                    "col": click_c,
+                                                }
+                                                name_base = unit_name.split("★")[0]
+                                                if name_base in all_units:
+                                                    ud = all_units[name_base]
+                                                    player.board.append(new_unit)
+                                                    shop.set_base_stats(
+                                                        player, len(player.board) - 1,
+                                                        int(ud["hp"] * (1.5 if new_unit.get("star", 1) == 2 else 2.0 if new_unit.get("star", 1) == 3 else 1)),
+                                                        int(ud["damage"] * (1.5 if new_unit.get("star", 1) == 2 else 2.0 if new_unit.get("star", 1) == 3 else 1)),
+                                                        ud["attack_speed"])
+                                                self.play_sound("click")
+                                            self.selected_field_cell = cell_key
+                                            self.selected_bench_idx = None
+                                            self.selected_shop_idx = None
+
+                elif event.type == pygame.MOUSEBUTTONUP:
+                    mx, my = event.pos
+                    # ── Если тащили юнт сベンча — разместить на клетке поля ──
+                    if self.drag_bench_idx is not None:
+                        field_x0 = self.width // 3 + 10
+                        field_y0 = BOARD_Y0
+                        field_w = max(BOARD_W * 5, self.width // 3 - 20)
+                        field_h = max(BOARD_H * 6, 180)
+                        cell_w_f = field_w // 5
+                        cell_h_f = field_h // 5
+                        if my >= field_y0 + 30:
+                            click_r = (my - field_y0 - 30) // cell_h_f
+                            click_c = (mx - field_x0) // cell_w_f
+                            if 0 <= click_r < 5 and 0 <= click_c < 5:
+                                occupied = any(
+                                    u.get("row") == click_r and u.get("col") == click_c
+                                    for u in player.board
+                                )
+                                if not occupied:
+                                    bench_idx = self.drag_bench_idx
+                                    if bench_idx < len(player.reserve):
+                                        unit_name = player.reserve[bench_idx]
+                                        player.reserve.pop(bench_idx)
+                                        new_unit = {
+                                            "name": unit_name,
+                                            "star": 1,
+                                            "row": click_r,
+                                            "col": click_c,
+                                        }
+                                        name_base = unit_name.split("★")[0]
+                                        if name_base in all_units:
+                                            ud = all_units[name_base]
+                                            player.board.append(new_unit)
+                                            shop.set_base_stats(
+                                                player, len(player.board) - 1,
+                                                int(ud["hp"] * (1.5 if new_unit.get("star", 1) == 2 else 2.0 if new_unit.get("star", 1) == 3 else 1)),
+                                                int(ud["damage"] * (1.5 if new_unit.get("star", 1) == 2 else 2.0 if new_unit.get("star", 1) == 3 else 1)),
+                                                ud["attack_speed"])
+                                            self.play_sound("click")
+                        self.drag_bench_idx = None
+
+                    # ── Если тащили юнт с клетки поля — разместить на новой клетке ──
+                    elif self.drag_board_idx is not None:
+                        field_x0 = self.width // 3 + 10
+                        field_y0 = BOARD_Y0
+                        field_w = max(BOARD_W * 5, self.width // 3 - 20)
+                        field_h = max(BOARD_H * 6, 180)
+                        cell_w_f = field_w // 5
+                        cell_h_f = field_h // 5
+                        placed = False
+                        if my >= field_y0 + 30:
+                            click_r = (my - field_y0 - 30) // cell_h_f
+                            click_c = (mx - field_x0) // cell_w_f
+                            if 0 <= click_r < 5 and 0 <= click_c < 5:
+                                occupied = any(
+                                    u.get("row") == click_r and u.get("col") == click_c
+                                    for u in player.board
+                                )
+                                if not occupied:
+                                    # Размещаем юнта на новой клетке
+                                    unit_data = dict(self.drag_board_data)
+                                    unit_data["row"] = click_r
+                                    unit_data["col"] = click_c
+                                    player.board.append(unit_data)
+                                    # Пересчитать статы для нового индекса
+                                    idx = len(player.board) - 1
+                                    name_base = unit_data["name"].split("★")[0]
+                                    if name_base in all_units:
+                                        ud = all_units[name_base]
+                                        shop.set_base_stats(
+                                            player, idx,
+                                            int(ud["hp"] * (1.5 if unit_data.get("star", 1) == 2 else 2.0 if unit_data.get("star", 1) == 3 else 1)),
+                                            int(ud["damage"] * (1.5 if unit_data.get("star", 1) == 2 else 2.0 if unit_data.get("star", 1) == 3 else 1)),
+                                            ud["attack_speed"])
+                                    self.play_sound("click")
+                                    placed = True
+                        if not placed:
+                            # Клетка занята или клик вне поля — вернуть на исходную позицию
+                            orig_r, orig_c = self.drag_board_orig or (0, 0)
+                            unit_data = dict(self.drag_board_data)
+                            unit_data["row"] = orig_r
+                            unit_data["col"] = orig_c
+                            player.board.append(unit_data)
+                            idx = len(player.board) - 1
+                            name_base = unit_data["name"].split("★")[0]
+                            if name_base in all_units:
+                                ud = all_units[name_base]
+                                shop.set_base_stats(
+                                    player, idx,
+                                    int(ud["hp"] * (1.5 if unit_data.get("star", 1) == 2 else 2.0 if unit_data.get("star", 1) == 3 else 1)),
+                                    int(ud["damage"] * (1.5 if unit_data.get("star", 1) == 2 else 2.0 if unit_data.get("star", 1) == 3 else 1)),
+                                    ud["attack_speed"])
+                        self.drag_board_idx = None
+                        self.drag_board_orig = None
+                        self.drag_board_data = None
 
             # Check if player pressed Enter to exit draft
             if done_draft:
@@ -1126,6 +1558,9 @@ class GameUI:
                     "range_": ud["range"],
                     "class": ud["class"],
                     "crit_chance": ud.get("crit_chance", 0),
+                    # Позиция на тактическом поле 5×5 (если игрок поставил вручную)
+                    "row": unit.get("row"),
+                    "col": unit.get("col"),
                 }
 
                 # Add active ability if unit has one
@@ -1149,25 +1584,25 @@ class GameUI:
         return player_units, player.gold
 
     def _get_unit_positions(self, player_units, enemy_units):
-        """Get (x,y) positions for each unit on screen."""
-        cx = self.width // 2
-        cy = 100
-        unit_w = 150
+        """Позиции на тактическом поле 5×5: игрок слева (колонки 0-4),
+        враг справа (колонки 5-9)."""
+        cell_w = 100
+        cell_h = 70
+        offset_x = 60
+        offset_y = 100
+        enemy_offset_x = 600
         positions = {}
 
-        for i in range(len(player_units)):
-            x = 30 + i * (unit_w + 10)
-            y = cy + i * 70
-            cx_pos = x + 70  # center of unit rect
-            cy_pos = y + 25
-            positions[player_units[i]] = (cx_pos, cy_pos)
+        for u in player_units:
+            x = offset_x + u.col * cell_w
+            y = offset_y + u.row * cell_h
+            positions[u] = (x + cell_w // 2, y + cell_h // 2)
 
-        for i in range(len(enemy_units)):
-            x = cx + 50 + i * (unit_w + 10)
-            y = cy + i * 70
-            cx_pos = x + 70
-            cy_pos = y + 25
-            positions[enemy_units[i]] = (cx_pos, cy_pos)
+        for u in enemy_units:
+            # Вражеские колонки 5-9 → сдвигаем на 5, чтобы получить 0-4 внутри правой половины
+            x = offset_x + enemy_offset_x + (u.col - 5) * cell_w
+            y = offset_y + u.row * cell_h
+            positions[u] = (x + cell_w // 2, y + cell_h // 2)
 
         return positions
 
@@ -1204,6 +1639,29 @@ class GameUI:
             else:
                 effects["lines"].remove(line)
 
+        # Draw 5×5 grid lines for both sides so the tactical field is visible
+        cell_w = 100
+        cell_h = 70
+        offset_x = 60
+        offset_y = 100
+        enemy_offset_x = 600
+        grid_color = (60, 60, 80)
+        # Player side: cols 0-4
+        for c in range(6):
+            x = offset_x + c * cell_w
+            pygame.draw.line(surf, grid_color, (x, offset_y), (x, offset_y + 5 * cell_h), 1)
+        for r in range(6):
+            y = offset_y + r * cell_h
+            pygame.draw.line(surf, grid_color, (offset_x, y), (offset_x + 5 * cell_w, y), 1)
+        # Enemy side: cols 5-9 → local 0-4
+        ex0 = offset_x + enemy_offset_x
+        for c in range(6):
+            x = ex0 + c * cell_w
+            pygame.draw.line(surf, grid_color, (x, offset_y), (x, offset_y + 5 * cell_h), 1)
+        for r in range(6):
+            y = offset_y + r * cell_h
+            pygame.draw.line(surf, grid_color, (ex0, y), (ex0 + 5 * cell_w, y), 1)
+
         # Draw each unit
         for unit in player_units:
             if not unit.alive:
@@ -1221,6 +1679,8 @@ class GameUI:
                 ability_cooldown=ability_cooldown,
                 ability_cooldown_max=ability_cooldown_max,
                 tier_color=self.tier_color(self.display_name(unit.name)),
+                unit_class=getattr(unit, "unit_class", "warrior"),
+                star=getattr(unit, "star", 1),
             )
 
         for unit in enemy_units:
@@ -1239,6 +1699,8 @@ class GameUI:
                 ability_cooldown=ability_cooldown,
                 ability_cooldown_max=ability_cooldown_max,
                 tier_color=self.tier_color(self.display_name(unit.name)),
+                unit_class=getattr(unit, "unit_class", "warrior"),
+                star=getattr(unit, "star", 1),
             )
 
         # Draw dead units (faded)
@@ -1249,7 +1711,9 @@ class GameUI:
                 x, y = positions[unit]
                 self.draw_unit(
                     {"name": self.display_name(unit.name), "hp": 0, "_base_hp": unit.max_hp},
-                    x - 70, y - 25, (45, 45, 55), target=surf
+                    x - 70, y - 25, (45, 45, 55), target=surf,
+                    unit_class=getattr(unit, "unit_class", "warrior"),
+                    star=getattr(unit, "star", 1),
                 )
 
         for unit in enemy_units:
@@ -1257,7 +1721,9 @@ class GameUI:
                 x, y = positions[unit]
                 self.draw_unit(
                     {"name": self.display_name(unit.name), "hp": 0, "_base_hp": unit.max_hp},
-                    x - 70, y - 25, (45, 45, 55), target=surf
+                    x - 70, y - 25, (45, 45, 55), target=surf,
+                    unit_class=getattr(unit, "unit_class", "warrior"),
+                    star=getattr(unit, "star", 1),
                 )
 
         # Draw damage numbers on top of everything
@@ -1896,7 +2362,13 @@ class GameUI:
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         self.running = False
-                self.clock.tick(30)
+                        return
+                    if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                        break  # клик или клавиша пропускают паузу
+                else:
+                    self.clock.tick(30)
+                    continue
+                break
 
             # Здоровье кончилось — матч проигран
             if eliminated:
@@ -2098,7 +2570,12 @@ class GameUI:
                     if not self.running: return False
                     for event in pygame.event.get():
                         if event.type == pygame.QUIT: return False
-                    self.clock.tick(30)
+                        if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                            break  # клик или клавиша пропускают паузу
+                    else:
+                        self.clock.tick(30)
+                        continue
+                    break
                 
                 return True
             

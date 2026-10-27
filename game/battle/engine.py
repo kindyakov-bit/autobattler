@@ -1,47 +1,24 @@
-"""Боевой движок: детерминированный тик + seeded RNG.
+"""Боевой движок: тактическое поле 5×5 с каждой стороны, детерминированный тик.
 
-Масштаб времени
----------------
-1 тик = 1 кадр симуляции. Атака происходит раз в
-``ceil(60 / attack_speed)`` тиков, поэтому бой на 600 тиков ≈ 10 секунд.
-Кулдауны способностей и длительности эффектов указаны в ТЕХ ЖЕ тиках.
+Поле: 5 строк × 10 колонок. Первая команда (игрок) Controls колонки 0-4
+(левая половина), вторая команда (враг) — колонки 5-9 (правая половина).
 
-Целевание
----------
-Юниты выстроены в колонку: юнит с индексом i стоит в i-й колонке своей команды.
-Дистанция между юнитом i и врагом j = ``1 + (i + j + 1) // 2`` колонок: оба
-отступают от переднего края своей команды, поэтому задние юниты и досягаемость
-хуже. Юнит бьёт только если ``range_ >= дистанция``.
+Юниты имеют координаты (row, col) на поле.
 
-Шкала подобрана так, чтобы range=6 (легендарный маг) доставал до любого врага,
-а ближние юниты (range_ <= 1) сближались на одну колонку каждые
-``MOVE_TICKS_PER_COLUMN`` тиков — задним линиям нужно время, чтобы вступить в бой.
-
-Способности
------------
-Поддержанные типы активок (данные — в data/units.json):
-    - aoe_damage            — урон по области
-    - single_target_critical — гарантированный крит по самому слабому врагу
-    - aoe_damage_slow       — урон по области + замедление врагов
-    - aoe_damage_buff       — урон по области + бафф своей скорости атаки
-    - buff_allies           — снижение входящего урона союзникам
-    - buff_next_attack      — следующая атака бьёт по области с бонусом урона
-    - aura                  — бафф собственного урона за союзников своего класса
-
-Все эффекты «на N тиков» живут в Unit.statuses и корректно истекают.
-
-Использование:
-    sim = BattleSimulator(seed=42)
-    sim.add_team("player", team_data)
-    sim.add_team("enemy", enemy_data)
-    result = sim.run()  # dict с итогами боя
+Логика движения и атаки:
+- Мили (range_ == 1) идут вплотную к ближайшему живому врагу (дистанция 1)
+  и бьют его, когда становятся соседними клетками.
+- Дальнобойные (range_ >= 2, например маг 2, лучник 3) держат дистанцию
+  range_: если враг слишком близко — отходят на одну клетку, если далеко —
+  приближаются на одну клетку, если в радиусе range_ — стоят на месте и бьют.
+- Каждый тик юнит либо делает шаг (движение), либо атакует (по таймеру),
+  либо и то и другое (сначала шаг, потом攻击, если Timer сработал).
 """
 
 import math
 import random
 
-# Все типы активок, которые умеет движок. Всё, чего нет в этом кортеже,
-# считается ошибкой данных (а не молча неработающей способностью).
+# ── Все типы активок, которые умеет движок ────────────────────────────────
 SUPPORTED_ABILITY_TYPES = (
     "aoe_damage",
     "single_target_critical",
@@ -53,43 +30,39 @@ SUPPORTED_ABILITY_TYPES = (
 )
 
 # Виды временных эффектов на юните
-KIND_DAMAGE_BONUS = "damage_bonus"        # +плоский урон себе
-KIND_SPEED_PCT = "speed_pct"              # +% к своей скорости атаки
-KIND_DAMAGE_REDUCTION = "damage_reduction"  # -% ко входящему урону
-KIND_SLOW_PCT = "slow_pct"                # -% к скорости атаки (накладывается на врага)
-KIND_NEXT_ATTACK = "next_attack_bonus"    # бонус следующей атаки + свой радиус
+KIND_DAMAGE_BONUS = "damage_bonus"
+KIND_SPEED_PCT = "speed_pct"
+KIND_DAMAGE_REDUCTION = "damage_reduction"
+KIND_SLOW_PCT = "slow_pct"
+KIND_NEXT_ATTACK = "next_attack_bonus"
 
 # Лимиты радиуса урона по области
 MAX_AOE_TARGETS = {1: 1, 2: 3}
 MAX_AOE_TARGETS_DEFAULT = 5
 
-# Сколько тиков занимает сближение на одну колонку (для ближнего боя).
-# Значение подобрано так, чтобы сдвигать момент первого удара: атака
-# происходит раз в ceil(60 / attack_speed) тиков, поэтому сближение на
-# 30 тиков за колонку реально задерживает выход задних линий в бой.
-MOVE_TICKS_PER_COLUMN = 30
-
-# Максимум тиков сближения. Должен перекрывать самую длинную дистанцию
-# (1 + 5 + 5 = 11 колонок), иначе задний юнит не дойдёт никогда.
-MAX_CLOSING_TICKS = 1000
-
-# Потолок суммарного снижения урона. Несколько «Щитовых стен» не должны
-# складываться в 100%+ и потом лечить юнита отрицательным уроном.
+# Потолок суммарного снижения урона
 MAX_DAMAGE_REDUCTION_PCT = 90
 
-# Лимит тиков одного боя. Подобран так, чтобы бои доигрывались до
-# annihilation даже на медленных танковых составах: зеркальный бой
-# 4 воинов (рыцари с 900 HP, удар раз в 75 тиков) занимал ~600 тиков.
+# Совместимость со старой логикой движения (теперь не используется напрямую)
+MOVE_TICKS_PER_COLUMN = 30
+
+# Лимит тиков одного боя
 MAX_BATTLE_TICKS = 900
+
+# ── Размеры тактического поля ──────────────────────────────────────────────
+BATTLE_ROWS = 5
+BATTLE_COLS_PER_TEAM = 5
+TOTAL_COLS = BATTLE_COLS_PER_TEAM * 2  # 10
 
 
 class Unit:
-    """Юнит на поле боя."""
+    """Юнит на тактическом поле боя."""
 
     def __init__(self, name: str, hp: int, damage: float, attack_speed: float,
                  range_: int, team: str, unit_id: int,
                  unit_class: str = "", crit_chance: float = 0.0,
-                 crit_multiplier: float = 1.75):
+                 crit_multiplier: float = 1.75, row: int | None = None,
+                 col: int | None = None):
         self.name = name
         self.max_hp = hp
         self.hp = hp
@@ -109,8 +82,19 @@ class Unit:
 
         # Временные эффекты: [{"kind": ..., "ticks": N, ...}]
         self.statuses: list[dict] = []
-        # Сколько тиков юнит сближался с врагом (только для ближнего боя)
+
+        # Позиция на тактическом поле (row, col) своей половины.
+        # None = авторазмещение при добавлении команды.
+        self.row = row
+        self.col = col
+        self.start_row = row
+        self.start_col = col
+
+        # Сближение (legacy-счётчик, используется distance_to для совместимости
+        # со старыми тестами; в новой логике движение происходит каждый тик
+        # через _move_towards / _move_away)
         self.closing = 0
+
         # Реально применённый урон (после снижения) — для честных цифр в UI
         self.last_damage = 0.0
 
@@ -187,6 +171,8 @@ class Unit:
         self.hp = self.max_hp
         self.alive = True
         self.statuses = []
+        self.row = self.start_row
+        self.col = self.start_col
         self.closing = 0
         self.attack_timer = self._ticks_per_attack()
         self.ability_cooldown = (self.active_ability or {}).get("cooldown", 0)
@@ -206,17 +192,19 @@ class Unit:
         return False
 
     def tick(self, rng: random.Random | None = None) -> list[dict]:
-        """Обработать один тик юнитом. Возвращает список событий атак."""
+        """Обработать один тик юнитом (атака). Возвращает события атак.
+
+        Движение теперь обрабатывается в BattleSimulator.run(), здесь только
+        проверка таймера атаки и генерация события атаки.
+        """
         events = []
         if not self.alive:
             return events
 
-        # Таймер уже уменьшен в BattleSimulator.run() — проверяем только условие
         if self.attack_timer <= 0:
             bonus, radius = self.consume_next_attack()
             damage = self.damage + bonus
             crit = False
-            # crit_chance в данных указан в процентах (0..100)
             if rng is not None and self.crit_chance > 0:
                 if rng.random() < self.crit_chance / 100.0:
                     crit = True
@@ -253,12 +241,14 @@ class Unit:
             "base_attack_speed": self.base_attack_speed,
             "unit_class": self.unit_class,
             "statuses": [dict(s) for s in self.statuses],
-            "closing": self.closing,
+            "row": self.row,
+            "col": self.col,
+            "closing": 0,
         }
 
 
 class BattleSimulator:
-    """Симулятор боя: два отряда, детерминированный тик."""
+    """Симулятор боя на тактическом поле 5×5 с каждой стороны."""
 
     def __init__(self, seed: int = 42):
         self.seed = seed
@@ -266,6 +256,8 @@ class BattleSimulator:
         self._next_id = 0
         self.teams: dict[str, list[Unit]] = {}
         self._team_index: dict[int, int] = {}   # unit_id -> индекс внутри команды
+        self._team_side: dict[str, str] = {}    # team_name -> "left" / "right"
+        self._team_side_order = 0               # 0 = left, 1 = right
         self.log: list[dict] = []
         self.tick_count = 0
         self._tick_history: list[dict] = []
@@ -274,15 +266,33 @@ class BattleSimulator:
 
     # ── Формирование команд ────────────────────────────────────────────────
 
+    def _assign_side(self, team_name: str) -> str:
+        """Назначить стороне поля: первая команда — левая, вторая — правая."""
+        if team_name in self._team_side:
+            return self._team_side[team_name]
+        side = "left" if self._team_side_order == 0 else "right"
+        self._team_side[team_name] = side
+        self._team_side_order += 1
+        return side
+
+    def _team_col_range(self, team_name: str) -> tuple[int, int]:
+        """Диапазон колонок для команды на поле."""
+        side = self._team_side.get(team_name, "left")
+        if side == "left":
+            return 0, BATTLE_COLS_PER_TEAM - 1
+        return BATTLE_COLS_PER_TEAM, TOTAL_COLS - 1
+
     def add_team(self, name: str, units_data: list[dict]) -> None:
         """Добавить юнитов к команде (повторный вызов дополняет, а не заменяет).
 
         Поддерживаемые поля units_data:
-            - item_bonuses: {"hp_bonus": 200, "damage_bonus": 25, "speed_bonus_pct": 10}
+            - item_bonuses: {"hp_bonus": 200, "damage_bonus": 25, ...}
             - active:       dict активной способности из units.json
+            - row / col:    стартовая позиция на тактическом поле (опционально)
+            - unit_class:   класс юнита (warrior/mage/archer) — для aura
             - crit_chance / crit_multiplier: настройка критов
-            - unit_class:   класс юнита (warrior/mage/archer) — для aura-способностей
         """
+        self._assign_side(name)
         team_units = self.teams.setdefault(name, [])
 
         for ud in units_data:
@@ -291,10 +301,12 @@ class BattleSimulator:
             damage = float(ud["damage"]) + bonuses.get("damage_bonus", 0)
             attack_speed = float(ud["attack_speed"])
 
-            # Процентный бонус к скорости атаки (от предметов)
             speed_pct = bonuses.get("speed_bonus_pct", 0)
             if speed_pct:
                 attack_speed *= (1 + speed_pct / 100)
+
+            row = ud.get("row")
+            col = ud.get("col")
 
             u = Unit(
                 name=ud["name"],
@@ -307,10 +319,10 @@ class BattleSimulator:
                 unit_class=ud.get("unit_class", ud.get("class", "")),
                 crit_chance=float(ud.get("crit_chance", 0.0)),
                 crit_multiplier=float(ud.get("crit_multiplier", 1.75)),
+                row=row,
+                col=col,
             )
 
-            # Активная способность. Неизвестный тип — ошибка данных, её надо
-            # слышать сразу, а не искать потом «почему способность не работает».
             ability = ud.get("active")
             if ability:
                 atype = ability.get("type")
@@ -325,10 +337,44 @@ class BattleSimulator:
             self._next_id += 1
             team_units.append(u)
 
-        # Пересчитываем индексы внутри команды (нужны для дистанции)
+        # Авторасстановка по сетке 5×5 своей половины для юнитов без row/col
+        self._auto_place_team(name)
+
+        # Пересчитываем индексы внутри команды
         for team_name, units in self.teams.items():
             for idx, u in enumerate(units):
                 self._team_index[u.unit_id] = idx
+
+    def _auto_place_team(self, team_name: str) -> None:
+        """Расставить юнитов команды по сетке 5×5 своей половины, начиная от
+        границы с врагом (передние юниты у краёв: левый в кол 4, правый — в кол 5).
+
+        Свободные клетки генерируются в порядке: от границы к центру,
+        сверху вниз.
+        """
+        c0, c1 = self._team_col_range(team_name)
+        units = self.teams[team_name]
+        side = self._team_side.get(team_name, "left")
+
+        # Порядок колонок: от границы к центру команды
+        if side == "left":
+            col_order = list(range(c1, c0 - 1, -1))   # 4, 3, 2, 1, 0
+        else:
+            col_order = list(range(c0, c1 + 1))       # 5, 6, 7, 8, 9
+
+        free = [(r, c) for r in range(BATTLE_ROWS) for c in col_order]
+        idx = 0
+        for u in units:
+            if u.row is None or u.col is None:
+                if idx < len(free):
+                    u.row, u.col = free[idx]
+                    u.start_row, u.start_col = u.row, u.col
+                    idx += 1
+            else:
+                u.row = max(0, min(BATTLE_ROWS - 1, u.row))
+                u.col = max(c0, min(c1, u.col))
+                u.start_row, u.start_col = u.row, u.col
+                idx += 1
 
     # ── Дистанции и цели ───────────────────────────────────────────────────
 
@@ -339,54 +385,124 @@ class BattleSimulator:
                     return u
         return None
 
+    def distance(self, a: Unit, b: Unit) -> int:
+        """Манхэттенская дистанция между двумя юнитами на поле (минимум 1)."""
+        return max(1, abs(a.row - b.row) + abs(a.col - b.col))
+
     def distance_to(self, attacker: Unit, target: Unit) -> int:
-        """Дистанция в колонках, с учётом сближения атакующего.
-
-        База — ``1 + (i + j + 1) // 2``: юнит с индексом i и враг с индексом j
-        оба отстоят от переднего края своей команды.
-
-        Сближение применяется к ЛЮБОМУ юниту, у которого нет цели в радиусе:
-        иначе задняя линия выживших оказывается недосягаемой, и бой топчется
-        на месте до таймаута (замер: 6v6 = 600 тиков при 18 атаках).
-        """
-        ai = self._team_index.get(attacker.unit_id, 0)
-        tj = self._team_index.get(target.unit_id, 0)
-        base = 1 + (ai + tj + 1) // 2
+        """Манхэттенская дистанция между двумя юнитами (минимум 1),
+        с учётом сближения (closing) для обратной совместимости."""
+        base_row = attacker.row if attacker.row is not None else 0
+        base_col = attacker.col if attacker.col is not None else 0
+        target_row = target.row if target.row is not None else 0
+        target_col = target.col if target.col is not None else 0
+        base = max(1, abs(base_row - target_row) + abs(base_col - target_col))
         if attacker.closing:
             base = max(1, base - attacker.closing // MOVE_TICKS_PER_COLUMN)
         return base
 
+    def _cell_occupied_by_ally(self, unit: Unit, row: int, col: int) -> bool:
+        """Проверка, занята ли клетка живым союзником."""
+        if not (0 <= row < BATTLE_ROWS and 0 <= col < TOTAL_COLS):
+            return True  # вне поля — считаем занятым
+        for u in self.teams.get(unit.team, []):
+            if u is not unit and u.alive and u.row == row and u.col == col:
+                return True
+        return False
+
+    def _move_towards(self, unit: Unit, target_row: int, target_col: int) -> None:
+        """Сдвинуть юнита на одну клетку ближе к целевой позиции."""
+        # Сначала по колонке (к врагу), потом по строке
+        dc = 0
+        if target_col < unit.col:
+            dc = -1
+        elif target_col > unit.col:
+            dc = 1
+
+        dr = 0
+        if target_row < unit.row:
+            dr = -1
+        elif target_row > unit.row:
+            dr = 1
+
+        candidates = []
+        if dc != 0:
+            candidates.append((unit.row, unit.col + dc))
+        if dr != 0:
+            candidates.append((unit.row + dr, unit.col))
+        if dc != 0 and dr != 0:
+            candidates.append((unit.row + dr, unit.col + dc))
+
+        for nr, nc in candidates:
+            nr = max(0, min(BATTLE_ROWS - 1, nr))
+            nc = max(0, min(TOTAL_COLS - 1, nc))
+            if (nr, nc) == (unit.row, unit.col):
+                continue
+            if not self._cell_occupied_by_ally(unit, nr, nc):
+                unit.row, unit.col = nr, nc
+                return
+
+    def _move_away(self, unit: Unit, target: Unit) -> None:
+        """Сдвинуть юнита на одну клетку дальше от цели (удержание дистанции)."""
+        # Направление от цели
+        dr = 0
+        if target.row < unit.row:
+            dr = 1    # цель выше — уходим вниз
+        elif target.row > unit.row:
+            dr = -1   # цель ниже — уходим вверх
+
+        dc = 0
+        if target.col > unit.col:
+            dc = -1   # цель справа — уходим влево
+        elif target.col < unit.col:
+            dc = 1    # цель слева — уходим вправо
+
+        candidates = []
+        if dc != 0:
+            candidates.append((unit.row, unit.col + dc))
+        if dr != 0:
+            candidates.append((unit.row + dr, unit.col))
+        if dc != 0 and dr != 0:
+            candidates.append((unit.row + dr, unit.col + dc))
+
+        for nr, nc in candidates:
+            nr = max(0, min(BATTLE_ROWS - 1, nr))
+            nc = max(0, min(TOTAL_COLS - 1, nc))
+            if (nr, nc) == (unit.row, unit.col):
+                continue
+            if not self._cell_occupied_by_ally(unit, nr, nc):
+                unit.row, unit.col = nr, nc
+                return
+
     def _has_target_in_range(self, unit: Unit) -> bool:
-        """Есть ли живой враг, до которого юнит сейчас достаёт."""
+        """Есть ли живой враг, до которого юнит сейчас достаёт (дистанция <= range_)."""
         enemies = self._alive_enemies(unit)
         if not enemies:
             return False
-        nearest = min(enemies, key=lambda e: self.distance_to(unit, e))
-        return unit.range_ >= self.distance_to(unit, nearest)
+        nearest = min(enemies, key=lambda e: self.distance(unit, e))
+        return unit.range_ >= self.distance(unit, nearest)
 
     def _alive_enemies(self, unit: Unit) -> list[Unit]:
         return [u for t, lst in self.teams.items()
                 if t != unit.team for u in lst if u.alive]
 
     def _enemies_in_radius(self, unit: Unit, radius: int) -> list[Unit]:
-        """Цели урона по области.
+        """Цели урона по области: враги в радиусе `radius` от кастера.
 
-        Радиус в данных — это «ширина захвата»: сколько врагов с переднего края
-        попадает под удар (radius 1 → 1 цель, 2 → 3, 3+ → до 5).
-        Досягаемость (``range_``) при этом проверяется отдельно: если кастующему
-        не достать даже до ближайшего врага, способность ни по кому не бьёт.
+        Достаём только если до ближайшего врага есть дистанция (range_).
+        Возвращаем до `cap` ближайших.
         """
         enemies = sorted(self._alive_enemies(unit),
-                         key=lambda e: self.distance_to(unit, e))
+                         key=lambda e: self.distance(unit, e))
         if not enemies:
             return []
-        if unit.range_ < self.distance_to(unit, enemies[0]):
-            return []                      # не достаём ни до кого
+        if unit.range_ < self.distance(unit, enemies[0]):
+            return []
         cap = MAX_AOE_TARGETS.get(radius, MAX_AOE_TARGETS_DEFAULT)
-        return enemies[:cap]
+        return [e for e in enemies if self.distance(unit, e) <= radius][:cap]
 
     def _find_targets(self, event: dict) -> list[Unit]:
-        """Найти цели для атаки: ближайший живой враг в радиусе действия."""
+        """Найти цели для атаки: ближайший живой враг в радиусе range_."""
         attacker = self._find_unit(event["attacker_id"])
         if not attacker or not attacker.alive:
             return []
@@ -399,8 +515,8 @@ class BattleSimulator:
         if radius and radius > 0:
             return self._enemies_in_radius(attacker, radius)
 
-        nearest = min(enemies, key=lambda e: self.distance_to(attacker, e))
-        if attacker.range_ < self.distance_to(attacker, nearest):
+        nearest = min(enemies, key=lambda e: self.distance(attacker, e))
+        if attacker.range_ < self.distance(attacker, nearest):
             return []          # не достаёт — цель не выбрана
         return [nearest]
 
@@ -412,9 +528,8 @@ class BattleSimulator:
         targets = self._find_targets(event)
 
         if not targets:
-            return damage_events      # махнул в возду — визуального события нет
+            return damage_events
 
-        # Событие атаки для визуальных эффектов (линии атак)
         self._attack_events.append({
             "tick": self.tick_count,
             "attacker_id": event["attacker_id"],
@@ -425,13 +540,10 @@ class BattleSimulator:
         })
 
         for target in targets:
-            # Вариативность урона ±10%, детерминированная от seed
             variance = 0.9 + self.rng.random() * 0.2          # [0.9, 1.1]
             rolled = event["damage"] * variance
             died = target.take_damage(rolled)
 
-            # В лог пишем РЕАЛЬНО применённый урон (после щитов/снижения),
-            # чтобы цифры над юнитами совпадали с его полосой HP.
             devent = {
                 "type": "hit",
                 "tick": self.tick_count,
@@ -452,7 +564,6 @@ class BattleSimulator:
     # ── Способности ────────────────────────────────────────────────────────
 
     def _record_ability(self, unit: Unit, targets: list[int]) -> dict:
-        """Записать событие каста способности (и в лог, и для визуальных эффектов)."""
         ability = unit.active_ability or {}
         event = {
             "tick": self.tick_count,
@@ -468,7 +579,6 @@ class BattleSimulator:
         return log_event
 
     def _cast_ability(self, unit: Unit) -> list[dict]:
-        """Применить активную способность юнита. Возвращает события для лога."""
         ability = unit.active_ability
         if not ability:
             return []
@@ -483,7 +593,6 @@ class BattleSimulator:
                 unit, eff.get("damage", 0), radius)
 
             if atype == "aoe_damage_slow":
-                # Замедление всех задетых врагов
                 for target in self._enemies_in_radius(unit, radius):
                     target.add_status(
                         KIND_SLOW_PCT,
@@ -492,7 +601,6 @@ class BattleSimulator:
                     )
 
             elif atype == "aoe_damage_buff":
-                # Временный бафф собственной скорости атаки
                 unit.add_status(
                     KIND_SPEED_PCT,
                     eff.get("speed_bonus_duration", 20),
@@ -504,7 +612,6 @@ class BattleSimulator:
                 unit, eff.get("damage", 0))
 
         elif atype == "buff_allies":
-            # Снижение входящего урона всем союзникам
             for ally in self.teams.get(unit.team, []):
                 if not ally.alive:
                     continue
@@ -517,7 +624,6 @@ class BattleSimulator:
             events.append(self._record_ability(unit, targets))
 
         elif atype == "buff_next_attack":
-            # Следующая атака бьёт по области с бонусом урона
             unit.add_status(
                 KIND_NEXT_ATTACK,
                 eff.get("duration", 60),
@@ -527,7 +633,6 @@ class BattleSimulator:
             events.append(self._record_ability(unit, [unit.unit_id]))
 
         elif atype == "aura":
-            # Бонус к урону за каждого союзника своего класса
             allies = sum(1 for a in self.teams.get(unit.team, [])
                          if a.alive and a is not unit
                          and a.unit_class == unit.unit_class)
@@ -543,7 +648,6 @@ class BattleSimulator:
         return events
 
     def _apply_aoe_damage(self, caster: Unit, damage, radius: int) -> list[dict]:
-        """Урон по области всем врагам в радиусе."""
         events = []
         if not caster.alive:
             return events
@@ -572,7 +676,6 @@ class BattleSimulator:
 
             events.append(event)
 
-        # Событие способности для визуальных эффектов
         self._ability_events.append({
             "tick": self.tick_count,
             "caster_id": caster.unit_id,
@@ -586,7 +689,6 @@ class BattleSimulator:
         return events
 
     def _apply_single_target_critical(self, caster: Unit, damage) -> list[dict]:
-        """Гарантированный крит по самому слабому врагу."""
         events = []
         enemies = self._alive_enemies(caster)
         if not enemies:
@@ -629,7 +731,6 @@ class BattleSimulator:
     # ── Результат ──────────────────────────────────────────────────────────
 
     def _check_result(self) -> dict | None:
-        """Проверить условие конца боя. Возвращает результат или None."""
         alive = {}
         for name, units in self.teams.items():
             alive[name] = [u for u in units if u.alive]
@@ -637,11 +738,9 @@ class BattleSimulator:
         dead_teams = [n for n, u in alive.items() if len(u) == 0]
         live_teams = [n for n, u in alive.items() if len(u) > 0]
 
-        # Одна команда уничтожена — победила другая
         if len(dead_teams) == 1 and len(live_teams) == 1:
             return self._result(live_teams[0], "annihilation")
 
-        # Обе уничтожены одновременно — побеждает первая команда
         if len(dead_teams) == 2:
             return self._result(list(self.teams.keys())[0], "simultaneous_death")
 
@@ -665,11 +764,8 @@ class BattleSimulator:
         self._tick_history = []
         self._attack_events = []
         self._ability_events = []
-        # Каждый прогон начинается с одного и того же состояния RNG,
-        # поэтому run() можно вызывать повторно и получать тот же бой.
         self.rng = random.Random(self.seed)
 
-        # Юниты могли быть использованы ранее — возвращаем в исходное состояние
         for team in self.teams.values():
             for unit in team:
                 unit.reset()
@@ -688,14 +784,23 @@ class BattleSimulator:
                 if unit.active_ability and unit.ability_cooldown > 0:
                     unit.ability_cooldown -= 1
 
-                # 3. Не достаём ни до кого — сближаемся на один тик.
-                #    Раньше это делали только ближние юниты, и бой вставал
-                #    насмерть, когда выживали дальние.
-                if (unit.closing < MAX_CLOSING_TICKS
-                        and not self._has_target_in_range(unit)):
-                    unit.closing += 1
+                # 3. Движение к цели / удержание дистанции
+                enemies = self._alive_enemies(unit)
+                if enemies:
+                    nearest = min(enemies, key=lambda e: self.distance(unit, e))
+                    dist = self.distance(unit, nearest)
+                    if unit.range_ <= 1:
+                        # Мили:approaches up to distance 1
+                        if dist > 1:
+                            self._move_towards(unit, nearest.row, nearest.col)
+                    else:
+                        # Дальние: держать дистанцию range_
+                        if dist < unit.range_:
+                            self._move_away(unit, nearest)
+                        elif dist > unit.range_:
+                            self._move_towards(unit, nearest.row, nearest.col)
 
-                # 4. Атака
+                # 4. Атака (по таймеру)
                 unit.attack_timer -= 1
                 if unit.attack_timer <= 0:
                     for event in unit.tick(self.rng):
@@ -725,30 +830,33 @@ class BattleSimulator:
     # ── Состояние для UI ───────────────────────────────────────────────────
 
     def _take_snapshot(self) -> dict:
-        """Сохранить состояние всех юнитов для анимации."""
         return {name: [u.snapshot() for u in units]
                 for name, units in self.teams.items()}
 
     def get_unit_positions(self, player_units, enemy_units):
-        """Позиции юнитов на экране: игрок слева, враги справа, со смещением."""
-        cx = 600  # центр экрана (половина 1200)
-        cy = 140
+        """Позиции на тактическом поле 5×5: игрок слева (колонки 0-4),
+        враг справа (колонки 5-9)."""
+        cell_w = 100
+        cell_h = 70
+        offset_x = 60
+        offset_y = 100
+        enemy_offset_x = 600  # сдвиг правой половины
+
         positions = {}
 
-        for i in range(len(player_units)):
-            x = 30 + i * 160
-            y = cy + i * 80
-            positions[player_units[i]] = (x + 70, y + 25)
+        for u in player_units:
+            x = offset_x + u.col * cell_w
+            y = offset_y + u.row * cell_h
+            positions[u] = (x + cell_w // 2, y + cell_h // 2)
 
-        for i in range(len(enemy_units)):
-            x = cx + 50 + i * 160
-            y = cy + i * 80
-            positions[enemy_units[i]] = (x + 70, y + 25)
+        for u in enemy_units:
+            x = offset_x + enemy_offset_x + u.col * cell_w
+            y = offset_y + u.row * cell_h
+            positions[u] = (x + cell_w // 2, y + cell_h // 2)
 
         return positions
 
     def restore_from_snapshot(self, snapshot: dict) -> None:
-        """Восстановить состояние юнитов из snapshot'а."""
         for name, units in self.teams.items():
             if name not in snapshot:
                 continue
@@ -766,32 +874,32 @@ class BattleSimulator:
                 u.base_attack_speed = data.get("base_attack_speed", u.base_attack_speed)
                 u.unit_class = data.get("unit_class", u.unit_class)
                 u.statuses = [dict(s) for s in data.get("statuses", [])]
+                u.row = data.get("row", u.row)
+                u.col = data.get("col", u.col)
                 u.closing = data.get("closing", 0)
                 u._refresh_stats()
 
     def get_total_ticks(self) -> int:
-        """Общее количество тиков в истории."""
         return len(self._tick_history)
 
     def get_attack_events(self, up_to_tick: int = None) -> list[dict]:
-        """События атак для визуальных эффектов."""
         if up_to_tick is not None:
             return [e for e in self._attack_events if e["tick"] <= up_to_tick]
         return list(self._attack_events)
 
     def get_ability_events(self, up_to_tick: int = None) -> list[dict]:
-        """События способностей для визуальных эффектов."""
         if up_to_tick is not None:
             return [e for e in self._ability_events if e["tick"] <= up_to_tick]
         return list(self._ability_events)
 
     def print_state(self) -> str:
-        """Текущее состояние поля (для консоли)."""
         lines = [f"=== Тик {self.tick_count} ==="]
         for name, units in self.teams.items():
             alive_units = [u for u in units if u.alive]
             dead_units = [u for u in units if not u.alive]
-            hp_str = ", ".join(f"{u.name}: {u.hp:.0f}/{u.max_hp}" for u in alive_units)
+            hp_str = ", ".join(
+                f"{u.name}({u.row},{u.col}): {u.hp:.0f}/{u.max_hp}"
+                for u in alive_units)
             if dead_units:
                 dead_str = ", ".join(f"☠{u.name}" for u in dead_units)
                 lines.append(f"[{name}] {hp_str} | {dead_str}")
