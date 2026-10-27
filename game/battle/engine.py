@@ -62,7 +62,7 @@ class Unit:
                  range_: int, team: str, unit_id: int,
                  unit_class: str = "", crit_chance: float = 0.0,
                  crit_multiplier: float = 1.75, row: int | None = None,
-                 col: int | None = None):
+                 col: int | None = None, race: str = ""):
         self.name = name
         self.max_hp = hp
         self.hp = hp
@@ -74,11 +74,13 @@ class Unit:
         self.team = team
         self.unit_id = unit_id
         self.unit_class = unit_class
+        self.race = race
         self.alive = True
 
         # Криты (данные из JSON, по умолчанию выключены)
         self.crit_chance = float(crit_chance)
         self.crit_multiplier = float(crit_multiplier)
+        self.base_crit_chance = float(crit_chance)
 
         # Временные эффекты: [{"kind": ..., "ticks": N, ...}]
         self.statuses: list[dict] = []
@@ -250,7 +252,7 @@ class Unit:
 class BattleSimulator:
     """Симулятор боя на тактическом поле 5×5 с каждой стороны."""
 
-    def __init__(self, seed: int = 42):
+    def __init__(self, seed: int = 42, race_data: dict | None = None, race_synergy_data: dict | None = None):
         self.seed = seed
         self.rng = random.Random(seed)
         self._next_id = 0
@@ -263,6 +265,8 @@ class BattleSimulator:
         self._tick_history: list[dict] = []
         self._attack_events: list[dict] = []
         self._ability_events: list[dict] = []
+        self.race_data = race_data or {}       # определения рас из data/units.json ['races']
+        self.race_synergy_data = race_synergy_data or {}  # расовые синергии ['race_synergies']
 
     # ── Формирование команд ────────────────────────────────────────────────
 
@@ -305,6 +309,18 @@ class BattleSimulator:
             if speed_pct:
                 attack_speed *= (1 + speed_pct / 100)
 
+            # Базовые расовые бонусы (из races[race]['bonuses'])
+            race = ud.get("race", "")
+            race_def = self.race_data.get(race, {})
+            race_bonuses = race_def.get("bonuses", {})
+            if race_bonuses:
+                hp = int(hp * (1 + race_bonuses.get("hp_bonus_pct", 0) / 100))
+                damage = damage * (1 + race_bonuses.get("damage_bonus_pct", 0) / 100)
+                attack_speed = attack_speed * (1 + race_bonuses.get("attack_speed_pct", 0) / 100)
+                crit_chance = float(ud.get("crit_chance", 0.0)) + race_bonuses.get("crit_chance_bonus", 0)
+            else:
+                crit_chance = float(ud.get("crit_chance", 0.0))
+
             row = ud.get("row")
             col = ud.get("col")
 
@@ -317,10 +333,11 @@ class BattleSimulator:
                 team=name,
                 unit_id=self._next_id,
                 unit_class=ud.get("unit_class", ud.get("class", "")),
-                crit_chance=float(ud.get("crit_chance", 0.0)),
+                crit_chance=crit_chance,
                 crit_multiplier=float(ud.get("crit_multiplier", 1.75)),
                 row=row,
                 col=col,
+                race=race,
             )
 
             ability = ud.get("active")
@@ -339,6 +356,48 @@ class BattleSimulator:
 
         # Авторасстановка по сетке 5×5 своей половины для юнитов без row/col
         self._auto_place_team(name)
+
+        # Применяем расовые синергии (2+ юнита одной расы = бонус всей расе)
+        race_counts = {}
+        for u in team_units:
+            if u.race:
+                race_counts[u.race] = race_counts.get(u.race, 0) + 1
+
+        race_synergy_bonuses = {}
+        for race_name, race_info in self.race_synergy_data.items():
+            count = race_counts.get(race_name, 0)
+            thresholds = race_info.get("thresholds", [])
+            bonuses = race_info.get("bonuses", {})
+            active_bonus = None
+            for threshold in sorted(thresholds):
+                if count >= threshold:
+                    bonus_key = str(threshold)
+                    if bonus_key in bonuses:
+                        active_bonus = bonuses[bonus_key]
+            if active_bonus is not None:
+                race_synergy_bonuses[race_name] = active_bonus
+
+        if race_synergy_bonuses:
+            for u in team_units:
+                bonuses = race_synergy_bonuses.get(u.race, {})
+                old_damage = u.damage
+                u._base_hp = u.max_hp
+                u._base_damage = u.damage
+                u.base_damage = u.damage
+                u._base_attack_speed = u.attack_speed
+                u.base_attack_speed = u.attack_speed
+                u._base_crit_chance = u.crit_chance
+                if "hp_bonus_pct" in bonuses:
+                    u.max_hp = int(u.max_hp * (1 + bonuses["hp_bonus_pct"] / 100))
+                    u.hp = u.max_hp
+                if "damage_bonus_pct" in bonuses:
+                    u.damage = u.damage * (1 + bonuses["damage_bonus_pct"] / 100)
+                    u.base_damage = u.damage
+                if "attack_speed_pct" in bonuses:
+                    u.attack_speed = u.attack_speed * (1 + bonuses["attack_speed_pct"] / 100)
+                    u.base_attack_speed = u.attack_speed
+                if "crit_chance_bonus" in bonuses:
+                    u.crit_chance = u.crit_chance + bonuses["crit_chance_bonus"]
 
         # Пересчитываем индексы внутри команды
         for team_name, units in self.teams.items():

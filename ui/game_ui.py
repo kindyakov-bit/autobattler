@@ -426,7 +426,7 @@ class GameUI:
 
     def draw_unit(self, unit_dict, x, y, team_color, target=None,
                   ability_name=None, ability_cooldown=0, ability_cooldown_max=0,
-                  tier_color=None, unit_class=None, star=1):
+                  tier_color=None, unit_class=None, star=1, race=None):
         """Draw a unit with HP bar and ability cooldown indicator.
 
         target=None рисует на главный экран (драфт, результаты);
@@ -434,6 +434,7 @@ class GameUI:
         tier_color — цвет рамки по цене юнита (см. TIER_COLORS).
         unit_class — класс юнита для процедурного силуэта (warrior/mage/archer).
         star — звёздность 1..3 (рисуются звёздочки в углу).
+        race — раса юнита для окраски силуэта (human/orc/demon/elf/undead).
         """
         surf = target if target is not None else self.screen
         name = unit_dict.get("name", "?")
@@ -445,9 +446,10 @@ class GameUI:
         pygame.draw.rect(surf, team_color, (x, y, rect_w, rect_h), border_radius=6)
         # Процедурный силуэт юнита по классу + цвет тира + звёзды
         cls = unit_class or unit_dict.get("class", "warrior")
+        unit_race = race or unit_dict.get("race", "human")
         draw_unit_sprite(
             surf, x + 6, y + 8, rect_w - 12, rect_h - 20,
-            cls, tier_color=tier_color, star=star,
+            cls, tier_color=tier_color, star=star, race=unit_race,
         )
 
         # HP bar
@@ -891,9 +893,11 @@ class GameUI:
                 draw_item_icon(self.screen, x + SHOP_W // 2, shop_y + 42, 34,
                                item.get("type", "accessory"))
             else:
+                ud = self.all_units.get(name_key, {})
                 draw_unit_sprite(
                     self.screen, x + 12, shop_y + 16, SHOP_W - 24, 46,
                     cls, tier_color=self.tier_color(name), star=1,
+                    race=ud.get("race", "human"),
                 )
 
             # Стоимость в правом верхнем углу карточки
@@ -975,6 +979,7 @@ class GameUI:
                 ud.get("class", "warrior"),
                 tier_color=border_color,
                 star=int(unit_name.split("★")[1]) if "★" in unit_name else 1,
+                race=ud.get("race", "human"),
             )
             name_surf = self.font_micro.render(
                 self.fit_text(display_name, BENCH_W - 8, self.font_micro),
@@ -1032,6 +1037,7 @@ class GameUI:
                         ud.get("class", "warrior"),
                         tier_color=self.tier_color(unit.get("name", "?")),
                         star=unit.get("star", 1),
+                        race=ud.get("race", "human"),
                     )
                     name_surf = self.font_micro.render(
                         self.fit_text(ud.get("name", base), cw - 8, self.font_micro),
@@ -1065,6 +1071,7 @@ class GameUI:
                 ud.get("class", "warrior"),
                 tier_color=self.tier_color(unit_name),
                 star=int(unit_name.split("★")[1]) if "★" in unit_name else 1,
+                race=ud.get("race", "human"),
             )
 
         # Отрисовываем тащущегося юнита с поля на новую клетку
@@ -1079,6 +1086,7 @@ class GameUI:
                 ud.get("class", "warrior"),
                 tier_color=self.tier_color(unit_name),
                 star=int(unit_name.split("★")[1]) if "★" in unit_name else 1,
+                race=ud.get("race", "human"),
             )
 
         # ── Synergy info ────────────────────────────────────────────────
@@ -1723,6 +1731,7 @@ class GameUI:
                     "attack_speed": ud["attack_speed"],
                     "range_": ud["range"],
                     "class": ud["class"],
+                    "race": ud.get("race", "human"),
                     "crit_chance": ud.get("crit_chance", 0),
                     # Позиция на тактическом поле 5×5 (если игрок поставил вручную)
                     "row": unit.get("row"),
@@ -1847,6 +1856,7 @@ class GameUI:
                 tier_color=self.tier_color(self.display_name(unit.name)),
                 unit_class=getattr(unit, "unit_class", "warrior"),
                 star=getattr(unit, "star", 1),
+                race=getattr(unit, "race", "human"),
             )
 
         for unit in enemy_units:
@@ -1867,6 +1877,7 @@ class GameUI:
                 tier_color=self.tier_color(self.display_name(unit.name)),
                 unit_class=getattr(unit, "unit_class", "warrior"),
                 star=getattr(unit, "star", 1),
+                race=getattr(unit, "race", "human"),
             )
 
         # Draw dead units (faded)
@@ -1880,6 +1891,7 @@ class GameUI:
                     x - 70, y - 25, (45, 45, 55), target=surf,
                     unit_class=getattr(unit, "unit_class", "warrior"),
                     star=getattr(unit, "star", 1),
+                    race=getattr(unit, "race", "human"),
                 )
 
         for unit in enemy_units:
@@ -1890,6 +1902,7 @@ class GameUI:
                     x - 70, y - 25, (45, 45, 55), target=surf,
                     unit_class=getattr(unit, "unit_class", "warrior"),
                     star=getattr(unit, "star", 1),
+                    race=getattr(unit, "race", "human"),
                 )
 
         # Draw damage numbers on top of everything
@@ -2468,7 +2481,7 @@ class GameUI:
                 player_units = apply_passive_bonuses(player_units, passive)
 
             # Run battle simulation
-            sim = BattleSimulator(seed=seed + round_num)
+            sim = BattleSimulator(seed=seed + round_num, race_data=data["races"], race_synergy_data=data["race_synergies"])
             sim.add_team("player", player_units)
             sim.add_team("enemy", enemy_units)
             battle_result = sim.run()
@@ -2798,7 +2811,7 @@ class GameUI:
                 team2 = apply_passive_bonuses(team2, passive2)
 
             # ── Бой ────────────────────────────────────────────────────────
-            sim = BattleSimulator(seed=seed + round_num * 50)
+            sim = BattleSimulator(seed=seed + round_num * 50, race_data=data["races"], race_synergy_data=data["race_synergies"])
             sim.add_team("bot1", team1)
             sim.add_team("bot2", team2)
             battle_result = sim.run()

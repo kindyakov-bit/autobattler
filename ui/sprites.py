@@ -20,11 +20,29 @@ CLASS_BODY = {
     "archer": (160, 130, 100),    # кожа / куртка стрелка
 }
 
-# Акцентный цвет (оружие, детали)
+# Акцентный цвет (оружие, детали) по классу
 CLASS_ACCENT = {
     "warrior": (210, 180, 100),   # золото / бронза
     "mage": (255, 220, 60),       # магическое свечение
     "archer": (110, 170, 110),    # зелёный лук
+}
+
+# Базовый цвет тела силуэта по расе (переопределяет классовый, если задан)
+RACE_BODY = {
+    "human": (110, 140, 170),    # сталь / кожа человека
+    "orc": (80, 160, 80),        # зелёная кожа орка
+    "demon": (180, 60, 60),      # красная кожа демона
+    "elf": (120, 180, 140),      # серебристо-зелёная кожа эльфа
+    "undead": (120, 100, 140),   # серо-фиолетовая кожа нежити
+}
+
+# Акцентный цвет по расе (оружие, детали, магия)
+RACE_ACCENT = {
+    "human": (210, 180, 100),    # золото / бронза
+    "orc": (140, 200, 60),       # ярко-зелёное оружие орка
+    "demon": (255, 100, 100),    # огненно-красное
+    "elf": (200, 255, 200),      # магический зелёный свет
+    "undead": (180, 160, 220),   # некромантический фиолетовый
 }
 
 # Цвет кожи / лица / рук
@@ -126,7 +144,7 @@ def draw_tooltip(surf, x, y, text, font=None):
 
 
 def draw_unit_sprite(surf, x, y, w, h, unit_class, tier_color=None, star=1,
-                     body_color=None, accent_color=None):
+                     body_color=None, accent_color=None, race=None):
     """Рисует процедурный силуэт юнита в прямоугольнике (x, y, w, h).
 
     Args:
@@ -137,12 +155,31 @@ def draw_unit_sprite(surf, x, y, w, h, unit_class, tier_color=None, star=1,
         tier_color: цвет окантовки (из TIER_COLORS) — рисуется рамкой вокруг.
         star: звёздность 1..3 — рисует столько же звёздочек в правом нижнем углу.
         body_color / accent_color: переопределение цветов тела и акцента.
+        race: расa юнита ("human", "orc", "demon", "elf", "undead") —
+            определяет цвет тела и акцента, если не заданы body_color/accent_color.
     """
     cx = x + w // 2
     cy = y + h // 2
 
-    body = body_color or CLASS_BODY.get(unit_class, CLASS_BODY["warrior"])
-    accent = accent_color or CLASS_ACCENT.get(unit_class, CLASS_ACCENT["warrior"])
+    # Определяем цвета: приоритет body_color/accent_color > расовые > классовые
+    if body_color is None:
+        if race and race in RACE_BODY:
+            # Смешиваем цвет расы с цветом класса для уникального оттенка
+            class_body = CLASS_BODY.get(unit_class, CLASS_BODY["warrior"])
+            race_body = RACE_BODY[race]
+            body = tuple((class_body[i] + race_body[i]) // 2 for i in range(3))
+        else:
+            body = CLASS_BODY.get(unit_class, CLASS_BODY["warrior"])
+    else:
+        body = body_color
+
+    if accent_color is None:
+        if race and race in RACE_ACCENT:
+            accent = RACE_ACCENT[race]
+        else:
+            accent = CLASS_ACCENT.get(unit_class, CLASS_ACCENT["warrior"])
+    else:
+        accent = accent_color
 
     # Масштаб под размер ячейки
     s = min(w, h) / 40.0  # базовый модуль 40
