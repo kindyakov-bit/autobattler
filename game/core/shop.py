@@ -107,51 +107,63 @@ class Shop:
         player.reserve.append(unit["name"])
         return unit["name"]
 
+    def _count_copies(self, player, target_name: str) -> int:
+        """Считает копии target_name в резерве и на доске вместе."""
+        count = sum(1 for r in player.reserve if r == target_name)
+        count += sum(1 for u in player.board if u["name"] == target_name)
+        return count
+
+    def _remove_copies(self, player, target_name: str, count: int) -> int:
+        """Удаляет count копий target_name из резерва и доски.
+
+        Приоритет: сначала резерв (скамейка), потом доска. Освобождает
+        слоты на доске. Возвращает сколько реально удалено.
+        """
+        removed = 0
+        # Сначала из резерва
+        for r in list(player.reserve):
+            if r == target_name and removed < count:
+                player.reserve.remove(r)
+                removed += 1
+        # Потом с доски (освобождаем слоты)
+        if removed < count:
+            for u in list(player.board):
+                if u["name"] == target_name and removed < count:
+                    player.board.remove(u)
+                    removed += 1
+        return removed
+
     def _maybe_merge(self, player, name: str) -> str:
         """Автоматически сливать 3 одинаковых в ★2, затем ★2+★2 в ★3, затем 3★2→★3.
-        
+
+        Считает копии по ВСЕМ places: резерву (скамейке) и доске.
+        Если юниты на доске — они убираются с доски (освобождая слоты),
+        а результат кладётся в резерв.
+
         Returns merged name (after all merges). Only returns a merged name
         if this specific call triggered a merge.
         """
         base_name = name.split("★")[0]
         returned_name = name  # default: nothing was merged
 
-        # Try to merge three base copies into ★2
-        while sum(1 for r in player.reserve if r == base_name) >= 3:
-            removed = []
-            for r in list(player.reserve):
-                if r == base_name:
-                    player.reserve.remove(r)
-                    removed.append(r)
-                    if len(removed) == 3:
-                        break
+        # 3 × ★1 → ★2
+        while self._count_copies(player, base_name) >= 3:
+            self._remove_copies(player, base_name, 3)
             merged = base_name + "★2"
             player.reserve.append(merged)
             self.pool.refund(base_name, copies=2)
             returned_name = merged  # this call created a ★2
 
-        # Try to merge two ★2 copies into ★3
-        while sum(1 for r in player.reserve if r == base_name + "★2") >= 2:
-            removed = []
-            for r in list(player.reserve):
-                if r == base_name + "★2":
-                    player.reserve.remove(r)
-                    removed.append(r)
-                    if len(removed) == 2:
-                        break
+        # 2 × ★2 → ★3
+        while self._count_copies(player, base_name + "★2") >= 2:
+            self._remove_copies(player, base_name + "★2", 2)
             merged = base_name + "★3"
             player.reserve.append(merged)
             returned_name = merged  # this call created a ★3
 
-        # Try to merge three ★2 copies into ★3 (альтернативный путь)
-        while sum(1 for r in player.reserve if r == base_name + "★2") >= 3:
-            removed = []
-            for r in list(player.reserve):
-                if r == base_name + "★2":
-                    player.reserve.remove(r)
-                    removed.append(r)
-                    if len(removed) == 3:
-                        break
+        # 3 × ★2 → ★3 (альтернативный путь)
+        while self._count_copies(player, base_name + "★2") >= 3:
+            self._remove_copies(player, base_name + "★2", 3)
             merged = base_name + "★3"
             player.reserve.append(merged)
             returned_name = merged  # this call created a ★3
