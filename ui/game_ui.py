@@ -14,11 +14,12 @@ import time
 import pygame
 import sys
 from pathlib import Path
-from ui.sprites import draw_unit_sprite, draw_item_icon, draw_tooltip
 
 _PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
+
+from ui.sprites import draw_unit_sprite, draw_item_icon, draw_tooltip
 
 # ── Раскладка фазы драфта (одна True на отрисовку и на клики мышью) ──────────
 # Хитбоксы и рисование обязаны использовать одни и те же числа, иначе
@@ -2505,6 +2506,217 @@ class GameUI:
                     self.running = False
         
         pygame.quit()
+
+    def run_bot_vs_bot_match(self, bot1_preset="balanced", bot2_preset="aggressive",
+                             seed=42, rounds=8):
+        """Режим «бот против бота» без участия игрока.
+
+        Два бота с собственными экономиками закупаются через decide_draft,
+        сражаются на BattleSimulator, зарабатывают золото и теряют HP за
+        проигранные PvP-раунды. Возвращает статистику матча.
+
+        Args:
+            bot1_preset: preset первого бота (из BOT_PRESETS)
+            bot2_preset: preset второго бота
+            seed: базовый seed для RNG
+            rounds: количество раундов матча (1-8)
+
+        Returns:
+            dict с ключами: bot1_wins, bot2_wins, draws, rounds_played,
+            bot1_hp, bot2_hp, winner ("bot1"/"bot2"/"draw"), history
+        """
+        project_root = Path(__file__).parent.parent.resolve()
+        if str(project_root) not in sys.path:
+            sys.path.insert(0, str(project_root))
+
+        from game.core.bots import create_bot
+        from game.core.shop import Shop
+        from game.core.pool import Pool
+        from game.core.draft import DraftPhase
+        from game.core.player import Player
+        from game.battle.engine import BattleSimulator
+        from game.core.synergies import (
+            calculate_synergy_bonuses, apply_synergy_bonuses,
+            calculate_passive_bonuses, apply_passive_bonuses,
+        )
+        from game.core.economy import round_economy, START_HP
+        from game.core.round import load_game_data
+
+        data = load_game_data(project_root / "data" / "units.json")
+        all_units = data["units"]
+        unit_costs = {name: info["cost"] for name, info in all_units.items()}
+
+        bot1 = create_bot(preset=bot1_preset, seed=seed)
+        bot2 = create_bot(preset=bot2_preset, seed=seed + 1000)
+
+        gold1 = 10
+        gold2 = 10
+        hp1 = START_HP
+        hp2 = START_HP
+
+        history = []
+
+        for round_num in range(1, rounds + 1):
+            is_creep = round_num <= 3 or round_num % 3 == 0
+
+            # ── Бот 1 закупается ───────────────────────────────────────────
+            player1 = Player(gold=gold1)
+            rng1 = random.Random(seed + round_num * 100)
+            pool1 = Pool(unit_costs)
+            shop1 = Shop(pool1, unit_costs=unit_costs, rng=rng1)
+            draft1 = DraftPhase(shop1, all_units)
+            draft_decision1 = bot1.decide_draft(
+                available_units=all_units, gold=gold1,
+                current_team=[], synergy_data=data["synergies"])
+
+            purchased1 = []
+            for unit_info in draft_decision1:
+                name = unit_info["name"]
+                cost = unit_info.get("cost", 1)
+                if player1.gold >= cost:
+                    try:
+                        merged = draft1.buy_unit(player1, name)
+                        purchased1.append(merged)
+                    except Exception:
+                        pass
+            gold1 = player1.gold
+
+            # ── Бот 2 закупается ───────────────────────────────────────────
+            player2 = Player(gold=gold2)
+            rng2 = random.Random(seed + round_num * 100 + 1)
+            pool2 = Pool(unit_costs)
+            shop2 = Shop(pool2, unit_costs=unit_costs, rng=rng2)
+            draft2 = DraftPhase(shop2, all_units)
+            draft_decision2 = bot2.decide_draft(
+                available_units=all_units, gold=gold2,
+                current_team=[], synergy_data=data["synergies"])
+
+            purchased2 = []
+            for unit_info in draft_decision2:
+                name = unit_info["name"]
+                cost = unit_info.get("cost", 1)
+                if player2.gold >= cost:
+                    try:
+                        merged = draft2.buy_unit(player2, name)
+                        purchased2.append(merged)
+                    except Exception:
+                        pass
+            gold2 = player2.gold
+
+            # ── Формируем боевые составы ──────────────────────────────────
+            def make_battle_units(purchased, all_units):
+                units = []
+                for pu in purchased[:6]:
+                    name = pu.split("★")[0]
+                    if name in all_units:
+                        ud = all_units[name]
+                        star = 1
+                        if "★" in pu:
+                            star = int(pu.split("★")[1][1:])
+                        hp_mult = 1.5 if star == 2 else 2.0 if star == 3 else 1.0
+                        dmg_mult = 1.5 if star == 2 else 2.0 if star == 3 else 1.0
+                        eu = {
+                            "name": name,
+                            "hp": int(ud["hp"] * hp_mult),
+                            "damage": int(ud["damage"] * dmg_mult),
+                            "attack_speed": ud["attack_speed"],
+                            "range_": ud["range"],
+                            "class": ud["class"],
+                            "crit_chance": ud.get("crit_chance", 0),
+                        }
+                        if ud.get("active"):
+                            eu["active"] = dict(ud["active"])
+                        units.append(eu)
+                return units
+
+            team1 = make_battle_units(purchased1, all_units)
+            team2 = make_battle_units(purchased2, all_units)
+
+            if not team1:
+                team1 = [{"name": "warrior_freshman", "hp": 500, "damage": 40,
+                          "attack_speed": 1.2, "range_": 1, "class": "warrior"}]
+            if not team2:
+                team2 = [{"name": "warrior_freshman", "hp": 500, "damage": 40,
+                          "attack_speed": 1.2, "range_": 1, "class": "warrior"}]
+
+            # Симметрично применяем синергии и пассивки обеим сторонам
+            team1 = apply_synergy_bonuses(
+                team1, calculate_synergy_bonuses(team1, data["synergies"]))
+            team2 = apply_synergy_bonuses(
+                team2, calculate_synergy_bonuses(team2, data["synergies"]))
+            if self.all_units:
+                passive1 = calculate_passive_bonuses(team1, self.all_units)
+                team1 = apply_passive_bonuses(team1, passive1)
+                passive2 = calculate_passive_bonuses(team2, self.all_units)
+                team2 = apply_passive_bonuses(team2, passive2)
+
+            # ── Бой ────────────────────────────────────────────────────────
+            sim = BattleSimulator(seed=seed + round_num * 50)
+            sim.add_team("bot1", team1)
+            sim.add_team("bot2", team2)
+            battle_result = sim.run()
+
+            # ── Экономика и HP ─────────────────────────────────────────────
+            bot1_won = battle_result["winner"] == "bot1"
+            bot2_won = battle_result["winner"] == "bot2"
+            surviving1 = sum(1 for u in sim.teams.get("bot1", []) if u.alive)
+            surviving2 = sum(1 for u in sim.teams.get("bot2", []) if u.alive)
+
+            econ1 = round_economy(
+                gold=gold1, pvp_win=bot1_won, creep_win=False,
+                hp=hp1, is_creep=is_creep,
+                surviving_enemy_units=surviving2)
+            econ2 = round_economy(
+                gold=gold2, pvp_win=bot2_won, creep_win=False,
+                hp=hp2, is_creep=is_creep,
+                surviving_enemy_units=surviving1)
+
+            gold1 = econ1["gold_after"]
+            gold2 = econ2["gold_after"]
+            hp1 = econ1["hp_after"]
+            hp2 = econ2["hp_after"]
+
+            history.append({
+                "round": round_num,
+                "is_creep": is_creep,
+                "winner": battle_result["winner"],
+                "total_ticks": sim.get_total_ticks(),
+                "bot1_units": surviving1,
+                "bot2_units": surviving2,
+                "bot1_gold": gold1,
+                "bot2_gold": gold2,
+                "bot1_hp": hp1,
+                "bot2_hp": hp2,
+            })
+
+            if hp1 <= 0 or hp2 <= 0:
+                break
+
+        bot1_wins = sum(1 for s in history if s["winner"] == "bot1")
+        bot2_wins = sum(1 for s in history if s["winner"] == "bot2")
+        draws = len(history) - bot1_wins - bot2_wins
+
+        if hp1 <= 0 and hp2 <= 0:
+            winner = "draw"
+        elif hp1 <= 0:
+            winner = "bot2"
+        elif hp2 <= 0:
+            winner = "bot1"
+        else:
+            winner = "bot1" if bot1_wins > bot2_wins else "bot2" if bot2_wins > bot1_wins else "draw"
+
+        return {
+            "bot1": bot1.name,
+            "bot2": bot2.name,
+            "bot1_wins": bot1_wins,
+            "bot2_wins": bot2_wins,
+            "draws": draws,
+            "rounds_played": len(history),
+            "bot1_hp": hp1,
+            "bot2_hp": hp2,
+            "winner": winner,
+            "history": history,
+        }
 
     def _animate_battle(self, sim, state, all_sims, BG_COLOR):
         """Animate a single battle round. Returns True if user stayed."""
