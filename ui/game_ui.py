@@ -825,13 +825,6 @@ class GameUI:
             self.screen.blit(cost_surf, (x + SHOP_W - cost_surf.get_width() - 4,
                                          shop_y + SHOP_H - 18))
 
-            # Звёзды в правом верхнем углу карточки (над стоимостью)
-            star_y = shop_y + SHOP_H - 30
-            draw_unit_sprite(
-                self.screen, x + SHOP_W - 22, star_y, 18, 12,
-                cls, star=1,
-            )
-
             # Tooltip при наведении
             if hovered:
                 if name_key.startswith("ITEM:"):
