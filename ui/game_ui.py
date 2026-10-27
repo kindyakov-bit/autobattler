@@ -1135,9 +1135,25 @@ class GameUI:
                 # Повторение '★★' без цифры звёздность теряет.
                 if star > 1 and "★" not in name:
                     name = f"{name}★{star}"
+                # Восстанавливаем юнта на доске с его позицией на тактическом поле.
+                # row/col хранятся на верхнем уровне unit_data, а не внутри stats.
+                name_base = name.split("★")[0]
+                unit_data = {"name": name, "star": star}
+                if u.get("row") is not None:
+                    unit_data["row"] = u.get("row")
+                if u.get("col") is not None:
+                    unit_data["col"] = u.get("col")
                 if len(player.board) < 6:
-                    player.board.append(
-                        {"name": name, "star": star, **u.get("stats", {})})
+                    player.board.append(unit_data)
+                    # Переносим базовые статы, чтобы предметы и бонусы применялись корректно
+                    idx = len(player.board) - 1
+                    ud = all_units.get(name_base)
+                    shop.set_base_stats(
+                        player, idx,
+                        u.get("hp", ud.get("hp", 100) if ud else 100),
+                        u.get("damage", ud.get("damage", 10) if ud else 10),
+                        u.get("attack_speed", ud.get("attack_speed", 1.0) if ud else 1.0),
+                    )
                 else:
                     player.reserve.append(name)
 
@@ -1210,6 +1226,22 @@ class GameUI:
                         if player.reserve and len(player.board) < 6:
                             try:
                                 unit = draft_phase.place_on_board(player, len(player.reserve) - 1)
+                                # Найти первую свободную клетку на тактическом поле 5×5
+                                occupied = {
+                                    (u.get("row"), u.get("col"))
+                                    for u in player.board
+                                    if u.get("row") is not None and u.get("col") is not None
+                                }
+                                for r in range(5):
+                                    for c in range(5):
+                                        if (r, c) not in occupied:
+                                            unit["row"] = r
+                                            unit["col"] = c
+                                            occupied.add((r, c))
+                                            break
+                                    else:
+                                        continue
+                                    break
                                 # Set base stats for item bonus calculation
                                 name_base = unit["name"].split("★")[0]
                                 if name_base in all_units:
