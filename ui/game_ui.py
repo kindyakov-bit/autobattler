@@ -1157,6 +1157,11 @@ class GameUI:
                 else:
                     player.reserve.append(name)
 
+            # Восстанавливаем предметы между раундами (иначе пропадают после каждого боя)
+            saved_items = existing_units.get("items", [])
+            if saved_items:
+                player.items = [dict(it) for it in saved_items]
+
         # Mixed shop: units + items
         shop_items = self._mixed_roll(shop, count=7, item_count=3)
 
@@ -1529,21 +1534,40 @@ class GameUI:
                                     self.play_sound("click")
                                     placed = True
                         if not placed:
-                            # Клетка занята или клик вне поля — вернуть на исходную позицию
-                            orig_r, orig_c = self.drag_board_orig or (0, 0)
-                            unit_data = dict(self.drag_board_data)
-                            unit_data["row"] = orig_r
-                            unit_data["col"] = orig_c
-                            player.board.append(unit_data)
-                            idx = len(player.board) - 1
-                            name_base = unit_data["name"].split("★")[0]
-                            if name_base in all_units:
-                                ud = all_units[name_base]
-                                shop.set_base_stats(
-                                    player, idx,
-                                    int(ud["hp"] * (1.5 if unit_data.get("star", 1) == 2 else 2.0 if unit_data.get("star", 1) == 3 else 1)),
-                                    int(ud["damage"] * (1.5 if unit_data.get("star", 1) == 2 else 2.0 if unit_data.get("star", 1) == 3 else 1)),
-                                    ud["attack_speed"])
+                            # Клик на скамейке — вернуть юнта на скамейку (не на доску)
+                            bench_x0 = BENCH_X0
+                            bench_y0 = BENCH_Y0
+                            bench_x1 = bench_x0 + (self.width // 3 - 40)
+                            bench_y1 = bench_y0 + BENCH_ROW_H * 2  # до 2 рядов скамейки
+                            on_bench = (
+                                bench_x0 <= mx <= bench_x1
+                                and bench_y0 <= my <= bench_y1
+                                and len(player.reserve) < player.max_bench
+                            )
+                            if on_bench:
+                                # Возвращаем на скамейку
+                                unit_name = self.drag_board_data.get("name", "warrior_freshman")
+                                star = self.drag_board_data.get("star", 1)
+                                base = unit_name.split("★")[0]
+                                name_with_star = f"{base}★{star}" if star > 1 else base
+                                player.reserve.append(name_with_star)
+                                self.play_sound("click")
+                            else:
+                                # Клетка занята или клик вне поля — вернуть на исходную позицию
+                                orig_r, orig_c = self.drag_board_orig or (0, 0)
+                                unit_data = dict(self.drag_board_data)
+                                unit_data["row"] = orig_r
+                                unit_data["col"] = orig_c
+                                player.board.append(unit_data)
+                                idx = len(player.board) - 1
+                                name_base = unit_data["name"].split("★")[0]
+                                if name_base in all_units:
+                                    ud = all_units[name_base]
+                                    shop.set_base_stats(
+                                        player, idx,
+                                        int(ud["hp"] * (1.5 if unit_data.get("star", 1) == 2 else 2.0 if unit_data.get("star", 1) == 3 else 1)),
+                                        int(ud["damage"] * (1.5 if unit_data.get("star", 1) == 2 else 2.0 if unit_data.get("star", 1) == 3 else 1)),
+                                        ud["attack_speed"])
                         self.drag_board_idx = None
                         self.drag_board_orig = None
                         self.drag_board_data = None
@@ -1613,7 +1637,7 @@ class GameUI:
                  "attack_speed": 1.0, "range_": 4, "class": "mage"},
             ]
 
-        return player_units, player.gold
+        return player_units, player.gold, player.items
 
     def _get_unit_positions(self, player_units, enemy_units):
         """Позиции на тактическом поле 5×5: игрок слева (колонки 0-4),
@@ -2223,8 +2247,9 @@ class GameUI:
         hp = START_HP
         history = []  # list of round result dicts
         all_sims = {}  # round_num -> BattleSimulator
-        # Купленные юниты между раундами. Крип-раунды их не сбрасывают.
+        # Купленные юниты и предметы между раундами. Крип-раунды их не сбрасывают.
         stored_player_units = None
+        stored_player_items = None
 
         for round_num in range(1, 9):
             # Раунды 1-3 — крипы, потом каждый третий (6, 9, ...) — крип, остальные — PvP
@@ -2233,8 +2258,11 @@ class GameUI:
             # ── Драфт игрока. С ПЕРВОГО раунда. ────────────────────────────
             # Раньше крип-раунды шли с захардкоженным составом, то есть три
             # раунда из восьми были кат-сценой без единого решения игрока.
-            existing = {"units": stored_player_units, "gold": gold} \
-                if stored_player_units else None
+            existing = {
+                "units": stored_player_units,
+                "gold": gold,
+                "items": stored_player_items,
+            } if stored_player_units else None
             result = self._run_interactive_draft(
                 round_num=round_num,
                 is_creep=is_creep,
@@ -2244,8 +2272,9 @@ class GameUI:
             )
             if result is None:
                 return  # user quit
-            player_units, gold = result
+            player_units, gold, stored_items = result
             stored_player_units = player_units
+            stored_player_items = stored_items
 
             if is_creep:
                 # Крипы: волна растёт с номером раунда (раньше была одинаковой),
