@@ -170,8 +170,8 @@ def draw_unit_sprite(surf, x, y, w, h, unit_class, tier_color=None, star=1,
 
     # ----- Звёзды -----
     if star > 1:
-        star_r = max(2, int(3 * s))
-        gap = int(5 * s)
+        star_r = max(4, int(5 * s))  # минимум 4px, чтобы было видно на маленьких карточках доски
+        gap = int(6 * s)
         total_w = (star - 1) * gap + star_r * 2
         sx = x + w - total_w - 3
         sy = y + h - star_r - 3
