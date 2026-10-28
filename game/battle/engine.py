@@ -492,6 +492,27 @@ class BattleSimulator:
         if dc != 0 and dr != 0:
             candidates.append((unit.row + dr, unit.col + dc))
 
+        # Если прямой путь заблокирован союзником — пробуем обойти:
+        # сдвигаемся перпендикулярно направлению к цели, затем попробуем снова
+        if not candidates:
+            # Fallback: любое свободное соседнее место
+            for dr_fb in (-1, 0, 1):
+                for dc_fb in (-1, 0, 1):
+                    if dr_fb == 0 and dc_fb == 0:
+                        continue
+                    candidates.append((unit.row + dr_fb, unit.col + dc_fb))
+        else:
+            # Добавляем диагонали и боковые обходы как fallback
+            fallback = []
+            if dc != 0:
+                # Пробуем пойти вверх/вниз, потом横向
+                fallback.append((unit.row + dr if dr else unit.row - 1, unit.col + dc))
+                fallback.append((unit.row + dr if dr else unit.row + 1, unit.col + dc))
+            if dr != 0:
+                fallback.append((unit.row + dr, unit.col + dc if dc else unit.col - 1))
+                fallback.append((unit.row + dr, unit.col + dc if dc else unit.col + 1))
+            candidates.extend(fallback)
+
         for nr, nc in candidates:
             nr = max(0, min(BATTLE_ROWS - 1, nr))
             nc = max(0, min(TOTAL_COLS - 1, nc))
@@ -523,6 +544,14 @@ class BattleSimulator:
             candidates.append((unit.row + dr, unit.col))
         if dc != 0 and dr != 0:
             candidates.append((unit.row + dr, unit.col + dc))
+
+        # Fallback: любое свободное соседнее место
+        if not candidates:
+            for dr_fb in (-1, 0, 1):
+                for dc_fb in (-1, 0, 1):
+                    if dr_fb == 0 and dc_fb == 0:
+                        continue
+                    candidates.append((unit.row + dr_fb, unit.col + dc_fb))
 
         for nr, nc in candidates:
             nr = max(0, min(BATTLE_ROWS - 1, nr))

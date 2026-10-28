@@ -905,48 +905,59 @@ class GameUI:
             self.screen.blit(cost_surf, (x + SHOP_W - cost_surf.get_width() - 4,
                                          shop_y + SHOP_H - 18))
 
-            # Tooltip при наведении
+        # Tooltip при наведении на товар магазина (рисуется ВСЕМИ остальными элементами,
+        # чтобы не перекрывалось фоном скамейки и другими панелями)
+        shop_hover_tooltip = None
+        shop_hover_rect = None
+        for i in range(max_shop_slots):
+            item = shop_items[i]
+            x = item_x + i * SHOP_STEP
+            name_key = item.get("name", "?")
+            if not name_key.startswith("ITEM:"):
+                name = self.all_units.get(name_key, {}).get("name", name_key)
+                cls = self.all_units.get(name_key, {}).get("class", "warrior")
+                cost = self.all_units.get(name_key, {}).get("cost", 1)
+                ud = self.all_units.get(name_key, {})
+            else:
+                name = name_key[len("ITEM:"):]
+                cls = None
+                cost = item.get("cost", 1)
+                ud = None
+
+            slot_rect = pygame.Rect(x, shop_y, SHOP_W, SHOP_H)
+            hovered = slot_rect.collidepoint(mx, my)
             if hovered:
-                if name_key.startswith("ITEM:"):
-                    # Предмет: что он делает (описание + статы), без шанса
-                    desc = item.get("description", "")
-                    stats = item.get("stats", {})
-                    stat_labels = {
-                        "hp_bonus": "+{} HP",
-                        "damage_bonus": "+{} урона",
-                        "speed_bonus_pct": "+{}% скор. атаки",
-                    }
-                    stat_parts = [
-                        stat_labels.get(k, k).format(v)
-                        for k, v in stats.items()
-                    ]
-                    stats_text = " | ".join(stat_parts)
-                    tooltip = f"{name}\n${cost}"
-                    if desc:
-                        tooltip += f"\n{desc}"
-                    if stats_text:
-                        tooltip += f"\n{stats_text}"
-                else:
-                    # Юнит: способности (пассивка + активка), класс, без шанса
-                    ud = self.all_units.get(name_key, {})
-                    unit_desc = ud.get("description", "")
-                    lines = [f"{name}\n${cost}", f"Класс: {cls}"]
-                    if unit_desc:
-                        lines.append(unit_desc)
-                    passive = ud.get("passive")
-                    if passive:
-                        lines.append(
-                            f"Пассивка: {passive.get('name', '')} — {passive.get('desc', '')}"
-                        )
-                    active = ud.get("active")
-                    if active:
-                        cd = active.get("cooldown")
-                        cd_text = f" (к/д {cd} тиков)" if cd else ""
-                        lines.append(
-                            f"Активка: {active.get('name', '')} — {active.get('desc', '')}{cd_text}"
-                        )
-                    tooltip = "\n".join(lines)
-                draw_tooltip(self.screen, x, shop_y + SHOP_H + 18, tooltip, self.font_tiny)
+                self.hover_shop_idx = i
+                shop_hover_tooltip = (x, name_key, name, cls, cost, ud, item)
+                shop_hover_rect = slot_rect
+            else:
+                # Если больше не наведен — сбрасываем hover, чтобы подсказка не залипала
+                if self.hover_shop_idx == i:
+                    self.hover_shop_idx = None
+
+            border_color = (255, 255, 100) if i == self.selected_shop_idx else (100, 150, 200)
+            border_width = 3 if i == self.selected_shop_idx else 1
+            if hovered:
+                border_color = (255, 215, 0)
+                border_width = 2
+            pygame.draw.rect(self.screen, (60, 80, 100), slot_rect, border_radius=6)
+            pygame.draw.rect(self.screen, border_color, slot_rect, width=border_width, border_radius=6)
+
+            # Имя юнита над картинкой
+            name_surf = self.font_tiny.render(
+                self.fit_text(name, SHOP_W - 6), True, (255, 255, 255))
+            self.screen.blit(name_surf, (x + 3, shop_y + 4))
+
+            # Силуэт юнита в центре карточки
+            if name_key.startswith("ITEM:"):
+                draw_item_icon(self.screen, x + SHOP_W // 2, shop_y + 42, 34,
+                               item.get("type", "accessory"))
+            else:
+                draw_unit_sprite(
+                    self.screen, x + 12, shop_y + 16, SHOP_W - 24, 46,
+                    cls, tier_color=self.tier_color(name), star=1,
+                    race=ud.get("race", "human") if ud else "human",
+                )
 
         # ── BENCH section (юниты в запасе, внизу) ──
         pygame.draw.rect(self.screen, (30, 50, 70), (10, BENCH_Y0, self.width // 3 - 20, 180), border_radius=8)
@@ -1118,6 +1129,48 @@ class GameUI:
         controls = "W=Buy  S=Sell  D=Place  F=Remove  R=Roll  I=Item  A=Apply  Enter=Done  |  Клик: шоп/бенч/доска"
         ctrl_surf = self.font_tiny.render(controls, True, (150, 150, 150))
         self.screen.blit(ctrl_surf, (self.width // 2 - 310, self.height - 30))
+
+        # Tooltip магазина рисуем ВСЕМИ остальными элементами, чтобы не
+        # перекрывался фоном скамейки, полем и другими панелями.
+        if shop_hover_tooltip is not None:
+            x, name_key, name, cls, cost, ud, item = shop_hover_tooltip
+            if name_key.startswith("ITEM:"):
+                desc = item.get("description", "")
+                stats = item.get("stats", {})
+                stat_labels = {
+                    "hp_bonus": "+{} HP",
+                    "damage_bonus": "+{} урона",
+                    "speed_bonus_pct": "+{}% скор. атаки",
+                }
+                stat_parts = [
+                    stat_labels.get(k, k).format(v)
+                    for k, v in stats.items()
+                ]
+                stats_text = " | ".join(stat_parts)
+                tooltip = f"{name}\n${cost}"
+                if desc:
+                    tooltip += f"\n{desc}"
+                if stats_text:
+                    tooltip += f"\n{stats_text}"
+            else:
+                unit_desc = ud.get("description", "")
+                lines = [f"{name}\n${cost}", f"Класс: {cls}"]
+                if unit_desc:
+                    lines.append(unit_desc)
+                passive = ud.get("passive")
+                if passive:
+                    lines.append(
+                        f"Пассивка: {passive.get('name', '')} — {passive.get('desc', '')}"
+                    )
+                active = ud.get("active")
+                if active:
+                    cd = active.get("cooldown")
+                    cd_text = f" (к/д {cd} тиков)" if cd else ""
+                    lines.append(
+                        f"Активка: {active.get('name', '')} — {active.get('desc', '')}{cd_text}"
+                    )
+                tooltip = "\n".join(lines)
+            draw_tooltip(self.screen, x, shop_y + SHOP_H + 18, tooltip, self.font_tiny)
 
     def _draw_items_section(self, items: list[dict]):
         """Draw inventory section with items."""
