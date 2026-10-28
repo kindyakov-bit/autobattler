@@ -1213,10 +1213,8 @@ class GameUI:
 
             # Tooltip при наведении
             if hovered:
-                stats = item.get("stats", {})
-                stat_text = ", ".join(f"{k}: {v}" for k, v in stats.items()) if stats else ""
                 tooltip = (f"{name}\n${item.get('cost', '?')}  {item_type}\n"
-                           f"{stat_text}\n{item.get('description', '')}\n"
+                           f"{item.get('description', '')}\n"
                            "Клик — выбрать, затем клик по юниту на доске")
                 draw_tooltip(self.screen, x, y + 34, tooltip, self.font_tiny)
 
@@ -1584,18 +1582,15 @@ class GameUI:
                                                 except Exception:
                                                     pass
                                             else:
-                                                # Убрать юнита с поля на скамейку (если есть место)
-                                                if len(player.reserve) < player.max_bench:
-                                                    player.board.pop(unit_idx)
-                                                    player.reserve.append(unit_on_cell["name"])
-                                                    self.play_sound("click")
-                                                # Иначе — скамейка pleine, не убираем
+                                                # Начать перетаскивание юнта с этой клетки поля на другую
+                                                self.drag_board_idx = unit_idx
+                                                self.drag_board_orig = (unit_on_cell.get("row"),
+                                                                        unit_on_cell.get("col"))
+                                                self.drag_board_data = dict(unit_on_cell)
+                                                # Временно убираем с поля (вернём в MOUSEBUTTONUP, если не разместим)
+                                                player.board.pop(unit_idx)
+                                                self.play_sound("click")
                                             self.selected_bench_idx = None
-                                            self.selected_shop_idx = None
-                                            self.selected_field_cell = None
-                                            self.drag_board_idx = None
-                                            self.drag_board_orig = None
-                                            self.drag_board_data = None
                                             self.selected_shop_idx = None
                                             self.selected_field_cell = None
                                         else:

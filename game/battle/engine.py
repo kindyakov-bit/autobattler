@@ -492,26 +492,38 @@ class BattleSimulator:
         if dc != 0 and dr != 0:
             candidates.append((unit.row + dr, unit.col + dc))
 
-        # Если прямой путь заблокирован союзником — пробуем обойти:
-        # сдвигаемся перпендикулярно направлению к цели, затем попробуем снова
-        if not candidates:
-            # Fallback: любое свободное соседнее место
+        # Если основные направления заняты союзниками — пробуем обойти:
+        # сначала диагонали и боковые смещения, потом любое свободное место
+        fallback = []
+        if dc != 0:
+            # Движемся по колонке к врагу — пробуем сдвинуться вверх/вниз на той же колонке
+            fallback.append((unit.row - 1, unit.col + dc))
+            fallback.append((unit.row + 1, unit.col + dc))
+            # Или просто вверх/вниз по текущей колонке
+            fallback.append((unit.row - 1, unit.col))
+            fallback.append((unit.row + 1, unit.col))
+        if dr != 0:
+            # Движемся по строке к врагу — пробуем сдвинуться влево/вправо на той же строке
+            fallback.append((unit.row + dr, unit.col - 1))
+            fallback.append((unit.row + dr, unit.col + 1))
+            # Или просто влево/вправо по текущей строке
+            fallback.append((unit.row, unit.col - 1))
+            fallback.append((unit.row, unit.col + 1))
+
+        # Добавляем все fallback-варианты к основным candidatos
+        candidates.extend(fallback)
+
+        # Если всё ещё не нашли — любое свободное соседнее место
+        if not any(
+            not self._cell_occupied_by_ally(unit, max(0, min(BATTLE_ROWS - 1, nr)), max(0, min(TOTAL_COLS - 1, nc)))
+            for nr, nc in candidates
+            if (nr, nc) != (unit.row, unit.col)
+        ):
             for dr_fb in (-1, 0, 1):
                 for dc_fb in (-1, 0, 1):
                     if dr_fb == 0 and dc_fb == 0:
                         continue
                     candidates.append((unit.row + dr_fb, unit.col + dc_fb))
-        else:
-            # Добавляем диагонали и боковые обходы как fallback
-            fallback = []
-            if dc != 0:
-                # Пробуем пойти вверх/вниз, потом横向
-                fallback.append((unit.row + dr if dr else unit.row - 1, unit.col + dc))
-                fallback.append((unit.row + dr if dr else unit.row + 1, unit.col + dc))
-            if dr != 0:
-                fallback.append((unit.row + dr, unit.col + dc if dc else unit.col - 1))
-                fallback.append((unit.row + dr, unit.col + dc if dc else unit.col + 1))
-            candidates.extend(fallback)
 
         for nr, nc in candidates:
             nr = max(0, min(BATTLE_ROWS - 1, nr))
