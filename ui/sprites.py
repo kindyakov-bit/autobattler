@@ -52,17 +52,21 @@ def _load_sprite(unit_class: str) -> pygame.Surface:
     filename = _CLASS_TO_FILE.get(unit_class, "warrior.png")
     path = _ASSETS_DIR / filename
 
+    print(f"[DEBUG] Loading sprite: {path}", flush=True)
     try:
         surf = pygame.image.load(str(path))
         # Пробуем convert_alpha, если не получается — используем обычный Surface
         try:
             surf = surf.convert_alpha()
+            print(f"[DEBUG] Sprite loaded with convert_alpha: {path}", flush=True)
         except Exception:
             surf = surf.convert()
+            print(f"[DEBUG] Sprite loaded with convert: {path}", flush=True)
         _SPRITE_CACHE[unit_class] = surf
         return surf
-    except (pygame.error, FileNotFoundError, Exception):
+    except (pygame.error, FileNotFoundError, Exception) as e:
         # Если файла нет или не удалось загрузить — fallback на процедурку
+        print(f"[DEBUG] Sprite load FAILED: {path} ({e})", flush=True)
         return None
 
 
@@ -249,6 +253,11 @@ def _draw_fallback_sprite(surf, x, y, w, h, unit_class,
     # Окантовка тира (тонкая рамка вокруг всего спрайта)
     if tier_color is not None:
         pygame.draw.rect(surf, tier_color, (x, y, w, h), width=2, border_radius=6)
+
+    # Фон под телом — чуть темнее, для объёма
+    pygame.draw.rect(surf, tuple(max(0, c - 20) for c in body),
+                     (cx - int(10 * s), cy - int(7 * s),
+                      int(20 * s), int(16 * s)), border_radius=4)
 
     if unit_class == "warrior":
         _draw_warrior(surf, cx, cy, s, body, accent, DETAIL)

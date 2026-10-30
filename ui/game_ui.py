@@ -2068,7 +2068,6 @@ class GameUI:
             draw_unit_sprite(
                 self.screen, sprite_x, sprite_y, sprite_size, sprite_size,
                 cls_name,
-                tier_color=self.tier_color(self.display_name(unit.name)),
                 star=getattr(unit, "star", 1),
                 race=getattr(unit, "race", "human"),
             )
@@ -2120,7 +2119,6 @@ class GameUI:
             draw_unit_sprite(
                 self.screen, sprite_x, sprite_y, sprite_size, sprite_size,
                 cls_name,
-                tier_color=self.tier_color(self.display_name(unit.name)),
                 star=getattr(unit, "star", 1),
                 race=getattr(unit, "race", "human"),
             )
