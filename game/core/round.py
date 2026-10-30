@@ -21,7 +21,7 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from game.core.economy import round_economy
-from game.core.synergies import calculate_synergy_bonuses, apply_synergy_bonuses
+from game.core.team import build_combat_team
 from game.battle.engine import BattleSimulator
 from game.core.shop import Shop
 from game.core.pool import Pool
@@ -73,15 +73,9 @@ class Game:
 
         state = RoundState(self.round_number, is_creep)
 
-        # Фаза 1: расчёт синергий игрока (бонусы применяются к статам юнитов)
-        state.synergy_bonuses = calculate_synergy_bonuses(player_units, synergy_data)
-        player_units = apply_synergy_bonuses(player_units, state.synergy_bonuses)
-
-        # Фаза 1.5: применяем пассивные способности (если есть unit_data)
-        if self.unit_data:
-            from game.core.synergies import calculate_passive_bonuses, apply_passive_bonuses
-            passive_bonuses = calculate_passive_bonuses(player_units, self.unit_data)
-            player_units = apply_passive_bonuses(player_units, passive_bonuses)
+        # Фаза 1: синергии и пассивки уже применены в build_combat_team() перед
+        # вызовом run_round — здесь не применяем повторно, иначе будет дубль.
+        state.synergy_bonuses = {}
 
         # Фаза 2: бой
         sim = BattleSimulator(seed=self.seed + self.round_number)
@@ -185,13 +179,19 @@ def creep_wave_for(round_num: int) -> list[str]:
 
 
 def build_creep_units(round_num: int, all_units: dict,
-                      player_units: list[dict] | None = None) -> list[dict]:
+                      player_units: list[dict] | None = None,
+                      synergy_data: dict | None = None,
+                      race_synergy_data: dict | None = None,
+                      race_data: dict | None = None) -> list[dict]:
     """Собрать врагов крип-раунда в формате для боя.
 
     Качество волны растёт с номером раунда (CREEP_WAVES), а КОЛИЧЕСТВО
     подстраивается под размер доски игрока: крипы — разминка, а не стена.
     Слабый старт (2 юнита) не должен упираться в 4 крипов 3-го раунда,
     иначе раунд выглядит тупиком. player_units=None → прежнее поведение.
+
+    Использует единую сборку build_combat_team для статов, расовых бонусов,
+    синергий и пассивок — как у игрока и ботов.
     """
     wave = creep_wave_for(round_num)
     if player_units is not None:
@@ -206,27 +206,24 @@ def build_creep_units(round_num: int, all_units: dict,
             while len(wave) < target:
                 wave.append(base[i % len(base)])
                 i += 1
-    units = []
+    units_data = []
     for key in wave:
         ud = all_units.get(key)
         if not ud:
             continue
-        d = {
-            "name": ud["name"],
-            "hp": ud["hp"],
-            "damage": ud["damage"],
-            "attack_speed": ud["attack_speed"],
-            "range_": ud["range"],
-            "class": ud["class"],
-            "crit_chance": ud.get("crit_chance", 0),
-        }
-        if ud.get("active"):
-            d["active"] = dict(ud["active"])
-        units.append(d)
-    return units
+        units_data.append({"name": key, "star": 1})
+    return build_combat_team(
+        units_data, all_units,
+        synergy_data=synergy_data,
+        race_synergy_data=race_synergy_data,
+        race_data=race_data,
+    )
 
 
-def _bot_draft_with_shop(bot, draft_phase: DraftPhase, unit_data: dict, gold: int, player: Player) -> list[dict]:
+def _bot_draft_with_shop(bot, draft_phase: DraftPhase, unit_data: dict, gold: int, player: Player,
+                         synergy_data: dict | None = None,
+                         race_synergy_data: dict | None = None,
+                         race_data: dict | None = None) -> list[dict]:
     """Бот покупает юнитов из магазина и размещает на доску.
     
     Returns:
@@ -263,29 +260,17 @@ def _bot_draft_with_shop(bot, draft_phase: DraftPhase, unit_data: dict, gold: in
         except Exception:
             pass
     
-    # Преобразуем в формат для боя (с учётом star-уровня)
-    enemy_unit_list = []
-    for unit_info in draft_decision[:6]:
-        name = unit_info["name"]
-        if name in unit_data:
-            ud = dict(unit_data[name])
-            # Star-бонусы: ★2 = +50% HP/dmg, ★3 = +100% HP/dmg
-            star = 1
-            for pu in purchased:
-                if pu.startswith(name) and "★" in pu:
-                    star = int(pu.split("★")[1][1:])
-            hp_mult = 1.5 if star == 2 else 2.0
-            dmg_mult = 1.5 if star == 2 else 2.0
-            enemy_unit_list.append({
-                "name": name,
-                "hp": int(ud["hp"] * hp_mult),
-                "damage": int(ud["damage"] * dmg_mult),
-                "attack_speed": ud["attack_speed"],
-                "range_": ud["range"],
-                "class": ud["class"],
-                "crit_chance": ud.get("crit_chance", 0),
-                "active": dict(ud["active"]) if ud.get("active") else None,
-            })
+    # Преобразуем в формат для боя через единую сборку build_combat_team
+    enemy_units_data = [
+        {"name": pu, "star": 1 if "★" not in pu else int(pu.split("★")[1][1:])}
+        for pu in purchased[:6]
+    ]
+    enemy_unit_list = build_combat_team(
+        enemy_units_data, unit_data,
+        synergy_data=synergy_data,
+        race_synergy_data=race_synergy_data,
+        race_data=race_data,
+    )
 
     if not enemy_unit_list:
         enemy_unit_list = [
@@ -324,15 +309,21 @@ def run_match(seed: int = 42, verbose: bool = False, enemy_bot: str = "balanced"
         is_creep = round_num <= 4
 
         if is_creep:
-            # Крип-раунд: фиксированный состав крипов
-            enemy_units = [
-                {"name": "warrior_freshman", "hp": 500, "damage": 40, "attack_speed": 1.2, "range_": 1, "class": "warrior"},
-                {"name": "archer_scout", "hp": 250, "damage": 45, "attack_speed": 1.5, "range_": 3, "class": "archer"},
-            ]
-            player_units = [
-                {"name": "warrior_freshman", "hp": 500, "damage": 40, "attack_speed": 1.2, "range_": 1, "class": "warrior"},
-                {"name": "mage_acolyte", "hp": 300, "damage": 65, "attack_speed": 1.0, "range_": 4, "class": "mage"},
-            ]
+            # Крип-раунд: волна через build_combat_team (статы, расы, синергии)
+            enemy_units = build_creep_units(
+                round_num, all_units, synergy_data=data["synergies"],
+                race_synergy_data=data["race_synergies"], race_data=data["races"],
+            )
+            player_units = build_combat_team(
+                [
+                    {"name": "warrior_freshman", "star": 1},
+                    {"name": "mage_acolyte", "star": 1},
+                ],
+                all_units,
+                synergy_data=data["synergies"],
+                race_synergy_data=data["race_synergies"],
+                race_data=data["races"],
+            )
         else:
             # PvP-раунд: бот покупает юнитов из магазина через DraftPhase
             from game.core.bots import create_bot
@@ -345,13 +336,22 @@ def run_match(seed: int = 42, verbose: bool = False, enemy_bot: str = "balanced"
                 unit_data=all_units,
                 gold=gold,
                 player=Player(gold=gold),
+                synergy_data=data["synergies"],
+                race_synergy_data=data["race_synergies"],
+                race_data=data["races"],
             )
 
             # Игрок тоже может выбрать состав (упрощённо — фиксированный)
-            player_units = [
-                {"name": "warrior_freshman", "hp": 500, "damage": 40, "attack_speed": 1.2, "range_": 1, "class": "warrior"},
-                {"name": "mage_acolyte", "hp": 300, "damage": 65, "attack_speed": 1.0, "range_": 4, "class": "mage"},
-            ]
+            player_units = build_combat_team(
+                [
+                    {"name": "warrior_freshman", "star": 1},
+                    {"name": "mage_acolyte", "star": 1},
+                ],
+                all_units,
+                synergy_data=data["synergies"],
+                race_synergy_data=data["race_synergies"],
+                race_data=data["races"],
+            )
 
         state = game.run_round(
             player_gold=gold,

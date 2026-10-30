@@ -2,29 +2,45 @@
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build / dist
 build/
 dist/
 *.egg-info/
 
-# Тесты / кэши
+# Pytest
 .pytest_cache/
 .coverage
 htmlcov/
 
-# Виртуальные окружения
-.venv/
-venv/
-env/
-
-# Временные артефакты отладки
+# Debug logs
 debug_log.txt
 debug_output.txt
 
-# Одноразовые скрипты отладки (не удалены, но вынесены из проекта)
+# Scratch ( temporary tests )
 _scratch/
-
-# OS
-Thumbs.db
-desktop.ini

@@ -81,6 +81,13 @@ class Unit:
         self.crit_chance = float(crit_chance)
         self.crit_multiplier = float(crit_multiplier)
         self.base_crit_chance = float(crit_chance)
+        self.crit_damage_bonus_pct = 0.0  # бонус к множителю крита (расовый demon)
+
+        # Регенерация HP в тик (расовый бонус нежити, hp_regen_pct)
+        self.hp_regen_pct = 0.0
+
+        # Базовое снижение урона (расовые синергии нежити 2/4)
+        self._base_damage_reduction_pct = 0.0
 
         # Временные эффекты: [{"kind": ..., "ticks": N, ...}]
         self.statuses: list[dict] = []
@@ -145,8 +152,9 @@ class Unit:
 
     def damage_reduction_pct(self) -> float:
         """Суммарное снижение входящего урона в процентах (с потолком)."""
-        total = sum(s.get("pct", 0) for s in self.statuses
-                    if s["kind"] == KIND_DAMAGE_REDUCTION)
+        total = self._base_damage_reduction_pct
+        total += sum(s.get("pct", 0) for s in self.statuses
+                     if s["kind"] == KIND_DAMAGE_REDUCTION)
         return min(MAX_DAMAGE_REDUCTION_PCT, total)
 
     def next_attack_bonus(self) -> tuple[float, int]:
@@ -289,12 +297,17 @@ class BattleSimulator:
     def add_team(self, name: str, units_data: list[dict]) -> None:
         """Добавить юнитов к команде (повторный вызов дополняет, а не заменяет).
 
+        Ожидает, что базовые статы, звёзды, предметы, расовые бонусы, синергии
+        и пассивки уже применены через build_combat_team(). Здесь только:
+        создаём Unit, валидируем тип активной способности, расставляем по полю.
+
         Поддерживаемые поля units_data:
             - item_bonuses: {"hp_bonus": 200, "damage_bonus": 25, ...}
             - active:       dict активной способности из units.json
             - row / col:    стартовая позиция на тактическом поле (опционально)
             - unit_class:   класс юнита (warrior/mage/archer) — для aura
             - crit_chance / crit_multiplier: настройка критов
+            - race / hp_regen_pct / mana_per_kill: расовые поля
         """
         self._assign_side(name)
         team_units = self.teams.setdefault(name, [])
@@ -309,17 +322,12 @@ class BattleSimulator:
             if speed_pct:
                 attack_speed *= (1 + speed_pct / 100)
 
-            # Базовые расовые бонусы (из races[race]['bonuses'])
-            race = ud.get("race", "")
-            race_def = self.race_data.get(race, {})
-            race_bonuses = race_def.get("bonuses", {})
-            if race_bonuses:
-                hp = int(hp * (1 + race_bonuses.get("hp_bonus_pct", 0) / 100))
-                damage = damage * (1 + race_bonuses.get("damage_bonus_pct", 0) / 100)
-                attack_speed = attack_speed * (1 + race_bonuses.get("attack_speed_pct", 0) / 100)
-                crit_chance = float(ud.get("crit_chance", 0.0)) + race_bonuses.get("crit_chance_bonus", 0)
-            else:
-                crit_chance = float(ud.get("crit_chance", 0.0))
+            # Раса и расовые бонусы уже применены в build_combat_team()
+            race = ud.get("race", "human")
+            crit_chance = float(ud.get("crit_chance", 0.0))
+            crit_multiplier = float(ud.get("crit_multiplier", 1.75))
+            hp_regen_pct = ud.get("hp_regen_pct", 0)
+            mana_per_kill = ud.get("mana_per_kill", 0)
 
             row = ud.get("row")
             col = ud.get("col")
@@ -334,11 +342,13 @@ class BattleSimulator:
                 unit_id=self._next_id,
                 unit_class=ud.get("unit_class", ud.get("class", "")),
                 crit_chance=crit_chance,
-                crit_multiplier=float(ud.get("crit_multiplier", 1.75)),
+                crit_multiplier=crit_multiplier,
                 row=row,
                 col=col,
                 race=race,
             )
+            u.hp_regen_pct = hp_regen_pct
+            u.mana_per_kill = mana_per_kill
 
             ability = ud.get("active")
             if ability:
@@ -357,48 +367,6 @@ class BattleSimulator:
         # Авторасстановка по сетке 5×5 своей половины для юнитов без row/col
         self._auto_place_team(name)
 
-        # Применяем расовые синергии (2+ юнита одной расы = бонус всей расе)
-        race_counts = {}
-        for u in team_units:
-            if u.race:
-                race_counts[u.race] = race_counts.get(u.race, 0) + 1
-
-        race_synergy_bonuses = {}
-        for race_name, race_info in self.race_synergy_data.items():
-            count = race_counts.get(race_name, 0)
-            thresholds = race_info.get("thresholds", [])
-            bonuses = race_info.get("bonuses", {})
-            active_bonus = None
-            for threshold in sorted(thresholds):
-                if count >= threshold:
-                    bonus_key = str(threshold)
-                    if bonus_key in bonuses:
-                        active_bonus = bonuses[bonus_key]
-            if active_bonus is not None:
-                race_synergy_bonuses[race_name] = active_bonus
-
-        if race_synergy_bonuses:
-            for u in team_units:
-                bonuses = race_synergy_bonuses.get(u.race, {})
-                old_damage = u.damage
-                u._base_hp = u.max_hp
-                u._base_damage = u.damage
-                u.base_damage = u.damage
-                u._base_attack_speed = u.attack_speed
-                u.base_attack_speed = u.attack_speed
-                u._base_crit_chance = u.crit_chance
-                if "hp_bonus_pct" in bonuses:
-                    u.max_hp = int(u.max_hp * (1 + bonuses["hp_bonus_pct"] / 100))
-                    u.hp = u.max_hp
-                if "damage_bonus_pct" in bonuses:
-                    u.damage = u.damage * (1 + bonuses["damage_bonus_pct"] / 100)
-                    u.base_damage = u.damage
-                if "attack_speed_pct" in bonuses:
-                    u.attack_speed = u.attack_speed * (1 + bonuses["attack_speed_pct"] / 100)
-                    u.base_attack_speed = u.attack_speed
-                if "crit_chance_bonus" in bonuses:
-                    u.crit_chance = u.crit_chance + bonuses["crit_chance_bonus"]
-
         # Пересчитываем индексы внутри команды
         for team_name, units in self.teams.items():
             for idx, u in enumerate(units):
@@ -408,8 +376,10 @@ class BattleSimulator:
         """Расставить юнитов команды по сетке 5×5 своей половины, начиная от
         границы с врагом (передние юниты у краёв: левый в кол 4, правый — в кол 5).
 
-        Свободные клетки генерируются в порядке: от границы к центру,
-        сверху вниз.
+        Ближние бойцы (range=1) ставятся на переднюю линию, дальние — сзади.
+        Клетки заполняются по строкам (а не колонкой за колонкой), чтобы между
+        союзниками оставались пробелы для движения — иначе задние юниты блокируют
+        путь передовой, и чемпион застревает за своими же бойцами.
         """
         c0, c1 = self._team_col_range(team_name)
         units = self.teams[team_name]
@@ -421,19 +391,31 @@ class BattleSimulator:
         else:
             col_order = list(range(c0, c1 + 1))       # 5, 6, 7, 8, 9
 
-        free = [(r, c) for r in range(BATTLE_ROWS) for c in col_order]
-        idx = 0
+        # Сначала ближние (range=1) — на переднюю линию, потом дальние — сзади
+        auto_units = [u for u in units if u.row is None or u.col is None]
+        ordered = sorted(auto_units, key=lambda u: u.range_)
+
+        # Занятые вручную клетки исключаем из свободных заранее
+        free = []
+        for r in range(BATTLE_ROWS):
+            for c in col_order:
+                free.append((r, c))
         for u in units:
-            if u.row is None or u.col is None:
-                if idx < len(free):
-                    u.row, u.col = free[idx]
-                    u.start_row, u.start_col = u.row, u.col
-                    idx += 1
-            else:
+            if u.row is not None and u.col is not None:
                 u.row = max(0, min(BATTLE_ROWS - 1, u.row))
                 u.col = max(c0, min(c1, u.col))
                 u.start_row, u.start_col = u.row, u.col
-                idx += 1
+                try:
+                    free.remove((u.row, u.col))
+                except ValueError:
+                    pass
+
+        # Расставляем по строкам: для каждой строки берём по одной клетке в колонке,
+        # чтобы между союзниками оставались пробелы для движения.
+        for u in ordered:
+            if free:
+                u.row, u.col = free.pop(0)
+                u.start_row, u.start_col = u.row, u.col
 
     # ── Дистанции и цели ───────────────────────────────────────────────────
 
@@ -587,19 +569,24 @@ class BattleSimulator:
                 if t != unit.team for u in lst if u.alive]
 
     def _enemies_in_radius(self, unit: Unit, radius: int) -> list[Unit]:
-        """Цели урона по области: враги в радиусе `radius` от кастера.
+        """Цели урона по области: враги в радиусе `radius` около ближайшей цели.
 
-        Достаём только если до ближайшего врага есть дистанция (range_).
-        Возвращаем до `cap` ближайших.
+        Основная цель — ближайший живой враг в радиусе атаки (range_).
+        Все враги в радиусе `radius` вокруг этой цели получают урон.
+        Возвращаем до `cap` ближайших к основной цели.
         """
-        enemies = sorted(self._alive_enemies(unit),
-                         key=lambda e: self.distance(unit, e))
+        enemies = self._alive_enemies(unit)
         if not enemies:
             return []
-        if unit.range_ < self.distance(unit, enemies[0]):
-            return []
+        nearest = min(enemies, key=lambda e: self.distance(unit, e))
+        if unit.range_ < self.distance(unit, nearest):
+            return []  # кастер не достаёт до ближайшего врага
         cap = MAX_AOE_TARGETS.get(radius, MAX_AOE_TARGETS_DEFAULT)
-        return [e for e in enemies if self.distance(unit, e) <= radius][:cap]
+        in_radius = sorted(
+            [e for e in enemies if self.distance(nearest, e) <= radius],
+            key=lambda e: self.distance(nearest, e),
+        )
+        return in_radius[:cap]
 
     def _find_targets(self, event: dict) -> list[Unit]:
         """Найти цели для атаки: ближайший живой враг в радиусе range_."""
@@ -715,11 +702,20 @@ class BattleSimulator:
             for ally in self.teams.get(unit.team, []):
                 if not ally.alive:
                     continue
-                ally.add_status(
-                    KIND_DAMAGE_REDUCTION,
-                    eff.get("duration", 20),
-                    pct=eff.get("damage_reduction_pct", 30),
-                )
+                # damage_bonus_pct — бафф урона союзникам (Вождь орков "Крик войны")
+                if eff.get("damage_bonus_pct"):
+                    ally.add_status(
+                        KIND_DAMAGE_BONUS,
+                        eff.get("duration", 20),
+                        amount=eff.get("damage_bonus_pct", 0),
+                    )
+                # damage_reduction_pct — щит союзникам (Рыцарь "Щитовая стена")
+                if eff.get("damage_reduction_pct"):
+                    ally.add_status(
+                        KIND_DAMAGE_REDUCTION,
+                        eff.get("duration", 20),
+                        pct=eff.get("damage_reduction_pct", 30),
+                    )
             targets = [a.unit_id for a in self.teams[unit.team] if a.alive]
             events.append(self._record_ability(unit, targets))
 
@@ -730,6 +726,16 @@ class BattleSimulator:
                 amount=eff.get("bonus_damage", 0),
                 radius=eff.get("radius", 1),
             )
+            # damage_reduction_pct — дебафф на ближайшего живого врага (Суккуб "Проклятие")
+            if eff.get("damage_reduction_pct"):
+                enemies = self._alive_enemies(unit)
+                if enemies:
+                    target = min(enemies, key=lambda e: self.distance(unit, e))
+                    target.add_status(
+                        KIND_DAMAGE_REDUCTION,
+                        eff.get("duration", 10),
+                        pct=eff.get("damage_reduction_pct", 25),
+                    )
             events.append(self._record_ability(unit, [unit.unit_id]))
 
         elif atype == "aura":
@@ -798,6 +804,16 @@ class BattleSimulator:
         rolled = damage * (0.9 + self.rng.random() * 0.2)
         died = target.take_damage(rolled)
 
+        ability = caster.active_ability or {}
+        eff = ability.get("effect", {})
+        ability_name = ability.get("name", "Способность")
+
+        # Вампиризм: лечим кастера на heal_pct от реально нанесённого урона (Лич "Касание смерти")
+        heal_pct = eff.get("heal_pct", 0)
+        if heal_pct and target.last_damage > 0:
+            heal = target.last_damage * heal_pct / 100.0
+            caster.hp = min(caster.max_hp, caster.hp + heal)
+
         event = {
             "type": "ability_hit",
             "tick": self.tick_count,
@@ -806,7 +822,7 @@ class BattleSimulator:
             "target_id": target.unit_id,
             "damage": round(target.last_damage, 1),
             "target_hp": target.hp,
-            "ability_name": "Выстрел смерти",
+            "ability_name": ability_name,
             "ability_type": "single_target_critical",
             "is_critical": True,
         }
@@ -820,7 +836,7 @@ class BattleSimulator:
             "tick": self.tick_count,
             "caster_id": caster.unit_id,
             "caster_team": caster.team,
-            "ability_name": "Выстрел смерти",
+            "ability_name": ability_name,
             "ability_type": "single_target_critical",
             "damage": damage,
             "targets": [target.unit_id],
@@ -873,12 +889,21 @@ class BattleSimulator:
         while self.tick_count < max_ticks:
             all_units = [u for team in self.teams.values() for u in team]
 
+            # Kil trackers for this tick: {attacker_id: [target_ids]}
+            kills_this_tick: dict[int, list[int]] = {}
+
             for unit in all_units:
                 if not unit.alive:
                     continue
 
                 # 1. Истечение временных эффектов
                 unit.tick_statuses()
+
+                # 1.5. Регенерация HP (расовый бонус нежити, hp_regen_pct)
+                if unit.hp_regen_pct > 0 and unit.alive:
+                    heal = unit.max_hp * unit.hp_regen_pct / 100.0
+                    if heal > 0:
+                        unit.hp = min(unit.max_hp, unit.hp + heal)
 
                 # 2. Кулдаун способности
                 if unit.active_ability and unit.ability_cooldown > 0:
@@ -890,7 +915,7 @@ class BattleSimulator:
                     nearest = min(enemies, key=lambda e: self.distance(unit, e))
                     dist = self.distance(unit, nearest)
                     if unit.range_ <= 1:
-                        # Мили:approaches up to distance 1
+                        # Мили: approaches up to distance 1
                         if dist > 1:
                             self._move_towards(unit, nearest.row, nearest.col)
                     else:
@@ -911,6 +936,25 @@ class BattleSimulator:
                 if unit.alive and unit.active_ability and unit.ability_cooldown == 0:
                     self.log.extend(self._cast_ability(unit))
                     unit.ability_cooldown = unit.active_ability.get("cooldown", 3)
+
+            # Собрать киллы за этот тик из лога (только новые события)
+            for evt in self.log:
+                if evt.get("tick") != self.tick_count:
+                    continue
+                if evt.get("type") in ("kill", "ability_kill"):
+                    killer_id = evt.get("attacker_id") or evt.get("caster_id")
+                    if killer_id is not None:
+                        kills_this_tick.setdefault(killer_id, []).append(evt.get("target_id"))
+
+            # Ускорение к/д способности за килл (mana_per_kill, магия)
+            for unit in all_units:
+                if not unit.alive:
+                    continue
+                if unit.mana_per_kill > 0 and unit.unit_id in kills_this_tick:
+                    if unit.active_ability and unit.ability_cooldown > 0:
+                        unit.ability_cooldown = max(
+                            0, unit.ability_cooldown - unit.mana_per_kill * len(kills_this_tick[unit.unit_id])
+                        )
 
             # Snapshot для анимации
             self._tick_history.append(self._take_snapshot())

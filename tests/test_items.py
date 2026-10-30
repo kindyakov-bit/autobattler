@@ -163,3 +163,74 @@ class TestItemsIntegration:
 
         assert player1.board[0]["item_bonuses"]["hp_bonus"] == 200
         assert player2.board[0]["item_bonuses"]["damage_bonus"] == 25
+
+
+# ---------- Продажа/удаление юнита не должна выбрасывать его предметы ----------
+
+class TestSellReturnsItems:
+    """Вещи с проданного (и убираемого при слиянии) юнита возвращаются в инвентарь."""
+
+    def _make_shop(self):
+        item_data = {
+            "power_blade": {"name": "Power Blade", "cost": 3, "type": "weapon", "stats": {"damage_bonus": 25}},
+        }
+        pool = Pool({"warrior_freshman": 1})  # стоимость 1 → 29 копий в пуле
+        shop = Shop(pool, unit_costs={"warrior_freshman": 1}, item_data=item_data)
+        return shop
+
+    def test_sell_from_board_returns_items_to_inventory(self):
+        shop = self._make_shop()
+        player = Player(gold=10)
+
+        shop.buy_item(player, "power_blade")
+        assert len(player.items) == 1
+
+        player.board.append({"name": "warrior_freshman", "star": 1})
+        shop.apply_item_to_unit(player, 0, 0)
+        assert len(player.board[0].get("items", [])) == 1
+        assert len(player.items) == 0
+
+        base = shop.sell(player, 0, from_board=True)
+        assert base == "warrior_freshman"
+        assert len(player.board) == 0
+        # Вещь с проданного юнита вернулась в инвентарь
+        assert len(player.items) == 1
+        assert player.items[0]["name"] == "Power Blade"
+
+    def test_sell_from_reserve_still_works(self):
+        shop = self._make_shop()
+        player = Player(gold=5)
+        shop.buy(player, "warrior_freshman", cost=1)
+        assert len(player.reserve) == 1
+
+        base = shop.sell(player, 0)  # from_board=False по умолчанию
+        assert base == "warrior_freshman"
+        assert len(player.reserve) == 0
+
+    def test_merge_returns_items_from_board_unit(self):
+        shop = self._make_shop()
+        player = Player(gold=30)
+
+        # 3 × ★1 → ★2 в резерве
+        for _ in range(3):
+            shop.buy(player, "warrior_freshman", cost=1)
+        assert any(r == "warrior_freshman★2" for r in player.reserve)
+
+        # Ставим ★2 на доску и вешаем на него предмет
+        shop.place(player, 0)
+        shop.buy_item(player, "power_blade")
+        shop.apply_item_to_unit(player, 0, 0)
+        assert len(player.board[0].get("items", [])) == 1
+        assert len(player.items) == 0
+
+        # Ещё 6 покупок warrior_freshman → два новых ★2 в резерве.
+        # Итого ★2 = 3 (2 в резерве + 1 на доске с предметом) → слияние в ★3.
+        for _ in range(6):
+            shop.buy(player, "warrior_freshman", cost=1)
+
+        assert any("★3" in r for r in player.reserve), player.reserve
+        board_names = [u["name"] for u in player.board]
+        assert "warrior_freshman★2" not in board_names, board_names
+        # Предмет с удалённого при слиянии юнита вернулся в инвентарь
+        assert len(player.items) == 1, player.items
+        assert player.items[0]["name"] == "Power Blade"

@@ -127,13 +127,18 @@ def calculate_passive_bonuses(team_units: list[dict], unit_data: dict) -> dict:
         if not passive or passive.get("type") != "synergy_buff":
             continue
 
-        # synergy_buff: бонус за каждого союзного юнита своего класса
+        # synergy_buff: бонус за каждого союзного юнита своего класса или расы
+        count_by = passive.get("count_by", "class")
         ally_count = 0
         for other in team_units:
             if other is unit:
                 continue
-            if other.get("class") == cls:
-                ally_count += 1
+            if count_by == "race":
+                if other.get("race") == unit.get("race"):
+                    ally_count += 1
+            else:
+                if other.get("class") == cls:
+                    ally_count += 1
 
         effect_type = passive["effect"]
         bonus_key = None

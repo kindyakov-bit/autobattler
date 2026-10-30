@@ -44,14 +44,27 @@ class Player:
         self.reserve.append(unit["name"])
         return unit
 
-    def get_synergy_count(self, class_name: str) -> int:
-        """Сколько юнитов класса class_name на доске."""
-        # name format: "class_something" или "class_something★2"
+    def get_synergy_count(self, class_name: str, all_units: dict | None = None) -> int:
+        """Сколько юнитов класса class_name на доске.
+
+        Если передан ``all_units`` (data/units.json['units']), класс берется
+        из определения юнита (поле ``class``). Иначе — старый фолбэк по
+        префиксу имени (работает только для warrior_/mage_/archer_).
+        """
         base = class_name.lower()
         count = 0
         for u in self.board:
-            if u["name"].lower().startswith(base):
-                count += 1
+            name_base = u["name"].split("★")[0]
+            cls = None
+            if all_units is not None and name_base in all_units:
+                cls = all_units[name_base].get("class", "")
+            if cls:
+                if cls == class_name:
+                    count += 1
+            else:
+                # Фолбэк: имя начинается с имени класса
+                if name_base.lower().startswith(base):
+                    count += 1
         return count
 
     def get_team_stats(self) -> list[dict]:

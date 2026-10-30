@@ -68,8 +68,23 @@ class Shop:
         player.buy(name)
         return self._maybe_merge(player, name)
 
-    def sell(self, player, idx: int) -> str:
-        """Продать юнита из резерва по индексу. Возвращает базовое имя."""
+    def sell(self, player, idx: int, from_board: bool = False) -> str:
+        """Продать одного юнита. Возвращает базовое имя.
+
+        from_board=False — продажа из резерва (скамейки).
+        from_board=True  — продажа юнита с доски: его предметы возвращаются
+                           в инвентарь игрока, чтобы не пропадали после продажи.
+        """
+        if from_board:
+            if idx < 0 or idx >= len(player.board):
+                raise ShopError(f"Индекс {idx} вне диапазона (board={len(player.board)})")
+            unit = player.board.pop(idx)
+            base_name = unit["name"].split("★")[0]
+            # Возвращаем предметы с проданного юнита в инвентарь игрока
+            for item in unit.get("items", []):
+                player.items.append(dict(item))
+            self.pool.refund(base_name, copies=1)
+            return base_name
         if idx < 0 or idx >= len(player.reserve):
             raise ShopError(f"Индекс {idx} вне диапазона (reserve={len(player.reserve)})")
         name = player.reserve.pop(idx)
@@ -106,6 +121,9 @@ class Shop:
         if idx < 0 or idx >= len(player.board):
             raise ShopError(f"Индекс {idx} вне диапазона (board={len(player.board)})")
         unit = player.board.pop(idx)
+        # Возвращаем предметы с юнита в инвентарь игрока
+        for item in unit.get("items", []):
+            player.items.append(dict(item))
         player.reserve.append(unit["name"])
         return unit["name"]
 
@@ -131,6 +149,10 @@ class Shop:
         if removed < count:
             for u in list(player.board):
                 if u["name"] == target_name and removed < count:
+                    # Возвращаем предметы с юнита в инвентарь перед удалением,
+                    # иначе вещи исчезнут при слиянии
+                    for item in u.get("items", []):
+                        player.items.append(dict(item))
                     player.board.remove(u)
                     removed += 1
         return removed
@@ -238,6 +260,8 @@ class Shop:
         if "stats" in item:
             if "item_bonuses" not in unit:
                 unit["item_bonuses"] = {}
+            if "items" not in unit:
+                unit["items"] = []
             
             for stat_name, stat_value in item["stats"].items():
                 if stat_name == "speed_bonus_pct":
@@ -248,8 +272,11 @@ class Shop:
                     # Фиксированная прибавка
                     current_val = unit.get("item_bonuses", {}).get(stat_name, 0)
                     unit["item_bonuses"][stat_name] = current_val + stat_value
+            
+            # Сохраняем копию предмета в юните, чтобы можно было вернуть при продаже
+            unit["items"].append(dict(item))
         
-        # Удаляем предмет из инвентаря (одноразовый)
+        # Удаляем предмет из инвентаря (он теперь на юните)
         player.items.pop(item_idx)
         
         return unit

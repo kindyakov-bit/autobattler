@@ -385,6 +385,7 @@
         "desc": "+15% урона за каждого союзного орка",
         "type": "synergy_buff",
         "class": "warrior",
+        "count_by": "race",
         "effect": {"damage_bonus_pct_per_ally": 15}
       },
       "active": null
@@ -405,6 +406,7 @@
         "desc": "+20% HP за каждого союзного орка",
         "type": "synergy_buff",
         "class": "warrior",
+        "count_by": "race",
         "effect": {"hp_bonus_pct_per_ally": 20}
       },
       "active": {
@@ -431,6 +433,7 @@
         "desc": "+10% урона за каждого союзного демона",
         "type": "synergy_buff",
         "class": "mage",
+        "count_by": "race",
         "effect": {"damage_bonus_pct_per_ally": 10}
       },
       "active": null
@@ -451,6 +454,7 @@
         "desc": "+15% урона за каждого союзного демона",
         "type": "synergy_buff",
         "class": "mage",
+        "count_by": "race",
         "effect": {"damage_bonus_pct_per_ally": 15}
       },
       "active": {
@@ -477,6 +481,7 @@
         "desc": "+15% скорости атаки за каждого союзного эльфа",
         "type": "synergy_buff",
         "class": "archer",
+        "count_by": "race",
         "effect": {"speed_bonus_pct_per_ally": 15}
       },
       "active": null
@@ -523,6 +528,7 @@
         "desc": "+5% снижения урона за каждого союзного нежити",
         "type": "synergy_buff",
         "class": "warrior",
+        "count_by": "race",
         "effect": {"damage_reduction_pct_per_ally": 5}
       },
       "active": null
@@ -543,6 +549,7 @@
         "desc": "+15% урона за каждого союзного нежити",
         "type": "synergy_buff",
         "class": "mage",
+        "count_by": "race",
         "effect": {"damage_bonus_pct_per_ally": 15}
       },
       "active": {

@@ -20,9 +20,14 @@ class DraftPhase:
         cost = self.unit_data.get(name, {}).get("cost", 1)
         return self.shop.buy(player, name, cost=cost)
 
-    def sell_unit(self, player, idx: int) -> str:
-        """Продать юнита из резерва. Возвращает базовое имя."""
-        return self.shop.sell(player, idx)
+    def sell_unit(self, player, idx: int, from_board: bool = False) -> str:
+        """Продать юнита.
+
+        from_board=False — из резерва (скамейки).
+        from_board=True  — с доски; предметы с юнита возвращаются в инвентарь.
+        Возвращает базовое имя.
+        """
+        return self.shop.sell(player, idx, from_board=from_board)
 
     def place_on_board(self, player, idx: int) -> dict:
         """Разместить юнита на доске."""
@@ -45,6 +50,7 @@ class DraftPhase:
         counts = {}
         for u in player.board:
             base = u["name"].split("★")[0]
-            cls = base.split("_")[0]  # warrior, mage, archer
+            ud = self.unit_data.get(base, {})
+            cls = ud.get("class", base.split("_")[0])  # поле class из JSON, фолбэк на префикс имени
             counts[cls] = counts.get(cls, 0) + 1
         return counts

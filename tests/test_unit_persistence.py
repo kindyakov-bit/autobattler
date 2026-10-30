@@ -49,9 +49,15 @@ def run_draft(ui, units, gold=10, round_num=2):
     real = pygame.event.get
     pygame.event.get = fake_get
     try:
+        # Добавляем координаты на доске (как в формате build_combat_team),
+        # иначе recovery-код считает юнитами без позиции и кладёт в reserve.
+        units_with_pos = [
+            {**u, "row": i // 3, "col": i % 3}
+            for i, u in enumerate(units)
+        ]
         return ui._run_interactive_draft(
             round_num=round_num, is_creep=False, synergy_data={},
-            seed=42, existing_units={"units": units, "gold": gold})
+            seed=42, existing_units={"units": units_with_pos, "gold": gold})
     finally:
         pygame.event.get = real
 
@@ -62,7 +68,7 @@ class TestNoDuplicateUnits:
         units = [{"name": "warrior_freshman", "star": 1}]
         result = run_draft(draft_env, units)
         assert result is not None
-        player_units, _, _ = result
+        player_units, _, _, _, _ = result
         # бой строится с доски — там должен быть ровно 1 юнит
         assert len(player_units) == 1, (
             f"восстановлен {len(player_units)} юнитов из 1 — дубликат")
@@ -73,7 +79,7 @@ class TestNoDuplicateUnits:
             {"name": "mage_acolyte", "star": 1},
             {"name": "archer_scout", "star": 1},
         ]
-        _, _, _ = run_draft(draft_env, units)
+        _, _, _, _, _ = run_draft(draft_env, units)
         player_units = run_draft(draft_env, units)[0]
         assert len(player_units) == 3, (
             f"ожидали 3 юнита, получили {len(player_units)}")
@@ -89,7 +95,7 @@ class TestNoDuplicateUnits:
             {"name": "mage_sorcerer", "star": 1},
             {"name": "mage_archmage", "star": 1},
         ]
-        player_units, _, _ = run_draft(draft_env, units)
+        player_units, _, _, _, _ = run_draft(draft_env, units)
         assert len(player_units) == 6, (
             f"восстановили {len(player_units)} из 6 — часть состава потерялась")
 
@@ -98,7 +104,7 @@ class TestStarPersistence:
     def test_star_level_survives_restore(self, draft_env):
         """★2 не должен превращаться в ★1 при переносе между раундами."""
         units = [{"name": "warrior_freshman", "star": 2}]
-        player_units, _, _ = run_draft(draft_env, units)
+        player_units, _, _, _, _ = run_draft(draft_env, units)
         assert player_units, "состав потерялся"
         # HP ★2 = 500*1.5 = 750; если звёздность потеряна, будет 500
         hp = player_units[0]["hp"]
@@ -106,7 +112,7 @@ class TestStarPersistence:
 
     def test_star3_survives_restore(self, draft_env):
         units = [{"name": "warrior_freshman", "star": 3}]
-        player_units, _, _ = run_draft(draft_env, units)
+        player_units, _, _, _, _ = run_draft(draft_env, units)
         hp = player_units[0]["hp"]
         assert hp > 950, f"HP {hp} — звёздность ★3 потерялась (ожидали 1000)"
 

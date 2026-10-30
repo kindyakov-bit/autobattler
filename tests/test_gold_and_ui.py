@@ -189,8 +189,9 @@ class TestUIInvariants:
 
     def test_draft_layouts_share_constants(self, ui_source):
         """Отрисовка и хитбоксы используют одни константы."""
-        for const in ("BENCH_W", "BENCH_H", "BENCH_ROW_H", "BOARD_W",
-                      "BOARD_H", "SHOP_W", "SHOP_H"):
+        for const in ("SCREEN_MARGIN", "SHOP_CARD_MARGIN", "SHOP_CARD_COUNT",
+                      "BENCH_CELL_SIZE", "BENCH_CELL_MARGIN", "BOARD_CELL_SIZE",
+                      "BOARD_CELL_MARGIN", "SPRITE_FILL_RATIO"):
             assert ui_source.count(const) >= 2, (
                 f"константа {const} используется только в одном месте")
 
