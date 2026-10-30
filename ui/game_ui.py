@@ -34,7 +34,7 @@ SHOP_Y0 = 85
 SHOP_CARD_COUNT = 5          # сколько карточек в витрине
 SHOP_CARD_MARGIN = 12        # отступ между карточками
 SHOP_CARD_PADDING = 16       # внутренний отступ внутри карточки
-SHOP_CARD_ASPECT = 1.25      # высота/ширина карточки
+SHOP_CARD_ASPECT = 0.75      # высота/ширина карточки (магазин не должен перекрывать скамейку)
 
 # ── Bench (скамейка) constants ──────────────────────────────────────────
 BENCH_X0 = 20
@@ -54,6 +54,18 @@ BOARD_CELL_MARGIN = 6        # отступ между ячейками поля
 
 # Sprite fill ratio: спрайт занимает эту долю от размера ячейки (70-80%)
 SPRITE_FILL_RATIO = 0.75
+
+# ── Цветовая палитра визуального стиля ─────────────────────────────────
+COLOR_PANEL_BG = (30, 40, 55)          # темный фон панелей
+COLOR_PANEL_BORDER = (80, 100, 130)    # рамка панелей
+COLOR_PANEL_BORDER_GOLD = (255, 215, 0)  # золотая рамка (актив/ховер)
+COLOR_CELL_EMPTY = (45, 55, 70)        # пустая ячейка скамейки/поля
+COLOR_CELL_EMPTY_BORDER = (90, 110, 140) # рамка пустой ячейки
+COLOR_TEAM_PLAYER_CIRCLE = (60, 120, 220)  # круг под ногами союзника
+COLOR_TEAM_ENEMY_CIRCLE = (220, 60, 60)    # круг под ногами врага
+COLOR_HP_BG = (40, 40, 45)             # фон полоски здоровья
+COLOR_HP_BORDER = (200, 200, 200)      # рамка полоски здоровья
+COLOR_TEXT_BG = (0, 0, 0, 140)         # полупрозрачный черный для текста
 
 # Цвет рамки по цене юнита — как в TFT/Underlords: сразу видно, что дорого.
 # Ключ — цена из data/units.json.
@@ -464,84 +476,60 @@ class GameUI:
             self.font_tiny = pygame.font.Font(None, 14)
             self.font_micro = pygame.font.Font(None, 16)
 
-    def draw_unit(self, unit_dict, x, y, team_color, target=None,
-                  ability_name=None, ability_cooldown=0, ability_cooldown_max=0,
-                  tier_color=None, unit_class=None, star=1, race=None,
-                  rect_w=140, rect_h=50):
-        """Draw a unit with HP bar and ability cooldown indicator.
+    # ── Вспомогательные методы отрисовки ───────────────────────────────
 
-        target=None рисует на главный экран (драфт, результаты);
-        при тряске бой рисуется на отдельный слой.
-        tier_color — цвет рамки по цене юнита (см. TIER_COLORS).
-        unit_class — класс юнита для процедурного силуэта (warrior/mage/archer).
-        star — звёздность 1..3 (рисуются звёздочки в углу).
-        race — раса юнита для окраски силуэта (human/orc/demon/elf/undead).
-        rect_w, rect_h — размер карточки (по умолчанию 140×50; в бою ставьте ≤ cell_w).
-        """
-        surf = target if target is not None else self.screen
-        name = unit_dict.get("name", "?")
-        hp = unit_dict.get("hp", 0)
-        max_hp = unit_dict.get("_base_hp", unit_dict.get("hp", 100))
-        # Фон карточки — цвет команды
-        pygame.draw.rect(surf, team_color, (x, y, rect_w, rect_h), border_radius=6)
-        # Процедурный силуэт юнита по классу + цвет тира + звёзды
-        cls = unit_class or unit_dict.get("class", "warrior")
-        unit_race = race or unit_dict.get("race", "human")
-        draw_unit_sprite(
-            surf, x + 6, y + 8, rect_w - 12, rect_h - 20,
-            cls, tier_color=tier_color, star=star, race=unit_race,
-        )
+    def draw_rounded_panel(self, surf, x, y, w, h, radius=10,
+                           bg_color=COLOR_PANEL_BG,
+                           border_color=COLOR_PANEL_BORDER,
+                           border_width=2):
+        """Рисует панель со скругленными углами и окантовкой."""
+        # Фон
+        pygame.draw.rect(surf, bg_color, (x, y, w, h), border_radius=radius)
+        # Окантовка
+        if border_width > 0:
+            pygame.draw.rect(surf, border_color, (x, y, w, h),
+                             width=border_width, border_radius=radius)
 
-        # HP bar
-        hp_pct = max(0, min(1.0, hp / max(max_hp, 1)) if max_hp > 0 else 0)
-        bar_w = int((rect_w - 8) * hp_pct)
-        if hp_pct > 0.5:
-            bar_color = (60, 200, 60)
-        elif hp_pct > 0.25:
-            bar_color = (220, 180, 40)
+    def draw_hp_bar(self, surf, x, y, w, h, hp_pct,
+                    fill_color=(60, 200, 60)):
+        """Рисует полоску здоровья: темный фон + заливка + белая рамка + текст HP."""
+        hp_pct = max(0.0, min(1.0, hp_pct))
+        # Фон
+        pygame.draw.rect(surf, COLOR_HP_BG, (x, y, w, h), border_radius=2)
+        # Заливка
+        fill_w = int((w - 2) * hp_pct)
+        if fill_w > 0:
+            pygame.draw.rect(surf, fill_color, (x + 1, y + 1, fill_w, h - 2),
+                             border_radius=1)
+        # Белая рамка
+        pygame.draw.rect(surf, COLOR_HP_BORDER, (x, y, w, h),
+                         width=1, border_radius=2)
+
+    def draw_team_circle(self, surf, cx, cy, radius, is_player=True):
+        """Рисует цветной круг под ногами юнита (индикатор принадлежности команды)."""
+        color = COLOR_TEAM_PLAYER_CIRCLE if is_player else COLOR_TEAM_ENEMY_CIRCLE
+        pygame.draw.circle(surf, color, (cx, cy), radius)
+        # Белый обвод圈 для контраста
+        pygame.draw.circle(surf, (255, 255, 255), (cx, cy), radius, width=1)
+
+    def draw_text_overlay(self, surf, text, font, x, y, w, h,
+                          bg_color=COLOR_TEXT_BG,
+                          text_color=(255, 255, 255),
+                          align="center"):
+        """Рисует текст на полупрозрачной черной подложке."""
+        # Создаем поверхность с альфа-каналом для подложки
+        overlay = pygame.Surface((w, h), pygame.SRCALPHA)
+        overlay.fill(bg_color)
+        surf.blit(overlay, (x, y))
+        # Текст
+        text_surf = font.render(text, True, text_color)
+        if align == "center":
+            tr = text_surf.get_rect(center=(x + w // 2, y + h // 2))
+        elif align == "left":
+            tr = text_surf.get_rect(midleft=(x + 4, y + h // 2))
         else:
-            bar_color = (200, 40, 40)
-
-        if bar_w > 0:
-            pygame.draw.rect(surf, bar_color,
-                           (x + 4, y + rect_h - 10, bar_w, 6), border_radius=3)
-
-        # Unit name
-        name_surf = self.font_tiny.render(name, True, (255, 255, 255))
-        surf.blit(name_surf, (x + 4, y + 6))
-
-        # Ability name + cooldown indicator
-        if ability_name:
-            ready = ability_cooldown <= 0
-            ability_color = (100, 255, 100) if ready else (255, 220, 50)
-            ability_surf = self.font_tiny.render(ability_name, True, ability_color)
-            surf.blit(ability_surf, (x + 4, y + 22))
-
-            # Cooldown progress ring (right side of unit card)
-            ring_cx = x + rect_w - 20
-            ring_cy = y + rect_h // 2
-            ring_r = 12
-            ring_w = 3
-            # Background ring
-            pygame.draw.circle(surf, (60, 60, 60), (ring_cx, ring_cy), ring_r, ring_w)
-            if not ready and ability_cooldown_max > 0:
-                # Filled arc showing remaining cooldown
-                progress = 1.0 - (ability_cooldown / ability_cooldown_max)
-                end_angle = -90 + progress * 360
-                # Draw arc as series of lines
-                for angle in range(-90, int(end_angle)):
-                    rad = math.radians(angle)
-                    px = ring_cx + int(math.cos(rad) * ring_r)
-                    py = ring_cy + int(math.sin(rad) * ring_r)
-                    pygame.draw.circle(surf, ability_color, (px, py), 2)
-            else:
-                # Ready — solid fill
-                pygame.draw.circle(surf, (100, 255, 100), (ring_cx, ring_cy), ring_r - 1)
-
-        # HP text
-        hp_text = f"{int(hp)}/{max_hp}"
-        hp_surf = self.font_tiny.render(hp_text, True, (200, 200, 200))
-        surf.blit(hp_surf, (x + 4, y + rect_h - 8))
+            tr = text_surf.get_rect(center=(x + w // 2, y + h // 2))
+        surf.blit(text_surf, tr)
 
     def play_sound(self, name: str, volume: float = 1.0):
         """Проиграть звук, если звук включён."""
@@ -806,16 +794,21 @@ class GameUI:
         """Draw interactive draft phase with keyboard controls."""
         self.screen.fill((20, 30, 40))
 
-        # Header
+        # ── HUD: верхняя панель с плашкой (Раунд, Золото, HP) ──
+        hud_x = 20
+        hud_y = 8
+        hud_w = 320
+        hud_h = 34
+        self.draw_rounded_panel(
+            self.screen, hud_x, hud_y, hud_w, hud_h,
+            radius=8, border_width=2,
+        )
         status = "CREEP" if is_creep else "PvP"
-        header = f"ROUND {round_num} - DRAFT [{status}]"
-        surf = self.font_large.render(header, True, (255, 255, 100))
-        r = surf.get_rect(center=(self.width // 2, 30))
-        self.screen.blit(surf, r)
-
-        # Gold display
-        gold_surf = self.font_small.render(f"Gold: {gold}", True, (255, 215, 0))
-        self.screen.blit(gold_surf, (self.width - 150, 8))
+        header = f"ROUND {round_num} [{status}]"
+        header_surf = self.font_small.render(header, True, (255, 215, 0))
+        self.screen.blit(header_surf, (hud_x + 10, hud_y + 6))
+        gold_surf = self.font_small.render(f"Золото: {gold}", True, (255, 215, 0))
+        self.screen.blit(gold_surf, (hud_x + 10, hud_y + 18))
 
         # ── SHOP section: динамическая ширина карточек под экран ──
         mx, my = pygame.mouse.get_pos()
@@ -948,10 +941,13 @@ class GameUI:
             pygame.draw.rect(self.screen, (60, 80, 100), slot_rect, border_radius=6)
             pygame.draw.rect(self.screen, border_color, slot_rect, width=border_width, border_radius=6)
 
-            # Имя юнита над картинкой
-            name_surf = self.font_tiny.render(
-                self.fit_text(name, shop_card_w - 2 * SHOP_CARD_PADDING), True, (255, 255, 255))
-            self.screen.blit(name_surf, (x + SHOP_CARD_PADDING, shop_y + 4))
+            # Имя юнита над картинкой с полупрозрачной подложкой
+            self.draw_text_overlay(
+                self.screen, name, self.font_tiny,
+                x + SHOP_CARD_PADDING, shop_y + shop_card_h - 34,
+                shop_card_w - 2 * SHOP_CARD_PADDING, 22,
+                align="left",
+            )
 
             # Силуэт юнита в центре карточки (занимает ~70-80% от размера карточки)
             sprite_size = int(shop_card_w * SPRITE_FILL_RATIO)
@@ -960,6 +956,13 @@ class GameUI:
             if name_key.startswith("ITEM:"):
                 draw_item_icon(self.screen, x + shop_card_w // 2, shop_y + int(shop_card_h * 0.45),
                                sprite_size, item.get("type", "accessory"))
+                # Цена предмета — тоже на подложке
+                self.draw_text_overlay(
+                    self.screen, f"${cost}", self.font_tiny,
+                    x + SHOP_CARD_PADDING, shop_y + shop_card_h - 10,
+                    shop_card_w - 2 * SHOP_CARD_PADDING, 16,
+                    align="left",
+                )
             else:
                 draw_unit_sprite(
                     self.screen, sprite_x, sprite_y, sprite_size, sprite_size,
@@ -967,10 +970,7 @@ class GameUI:
                     race=ud.get("race", "human") if ud else "human",
                 )
 
-            # Стоимость в правом нижнем углу карточки
-            cost_surf = self.font_tiny.render(f"${cost}", True, (255, 215, 0))
-            self.screen.blit(cost_surf, (x + shop_card_w - cost_surf.get_width() - SHOP_CARD_PADDING,
-                                         shop_y + shop_card_h - cost_surf.get_height() - 8))
+            # Стоимость в правом нижнем углу карточки (уже выведена через draw_text_overlay выше)
 
         # ── BENCH section (юниты в запасе, внизу) ──
         bench_panel_w = self.width // 3 - 40
@@ -980,9 +980,24 @@ class GameUI:
         )
         bench_cell_h = bench_cell_w  # квадратные ячейки
         bench_panel_h = BENCH_Y0 + BENCH_ROWS * bench_cell_h + BENCH_CELL_MARGIN * 2 + 40
-        pygame.draw.rect(self.screen, (30, 50, 70), (10, BENCH_Y0, bench_panel_w, bench_panel_h), border_radius=8)
+        self.draw_rounded_panel(
+            self.screen, 10, BENCH_Y0, bench_panel_w, bench_panel_h,
+            radius=8, border_width=2,
+        )
         bench_title = self.font_small.render(f"BENCH ({len(player.reserve)}) — D=place", True, (200, 200, 200))
         self.screen.blit(bench_title, (20, BENCH_Y0 + 8))
+
+        # Рисуем пустые слоты скамейки (сетка)
+        for i in range(BENCH_MAX):
+            col = i % BENCH_COLS
+            row = i // BENCH_COLS
+            bx = BENCH_X0 + col * (bench_cell_w + BENCH_CELL_MARGIN)
+            by = BENCH_Y0 + 30 + row * (bench_cell_h + BENCH_CELL_MARGIN)
+            empty_rect = pygame.Rect(bx, by, bench_cell_w, bench_cell_h)
+            # Пустая ячейка: темный квадрат с тонкой рамкой
+            pygame.draw.rect(self.screen, COLOR_CELL_EMPTY, empty_rect, border_radius=4)
+            pygame.draw.rect(self.screen, COLOR_CELL_EMPTY_BORDER, empty_rect,
+                             width=1, border_radius=4)
 
         for i, unit_name in enumerate(player.reserve[:BENCH_MAX]):
             # Пропускаем юнт, которого сейчас тащат (рисуем его под курсором)
@@ -1158,11 +1173,24 @@ class GameUI:
         self._draw_items_section(player.items)
 
         # ── Кнопка начала раунда (клик мышью или Enter) ─────────────────
-        start_rect = pygame.Rect(self.width // 2 - 75, self.height - 90, 150, 30)
+        start_rect = pygame.Rect(self.width // 2 - 75, self.height - 80, 160, 36)
         hover_start = start_rect.collidepoint(mx, my)
-        pygame.draw.rect(self.screen, (60, 140, 60) if not hover_start else (90, 180, 90),
-                         start_rect, border_radius=6)
-        pygame.draw.rect(self.screen, (200, 200, 100), start_rect, width=1, border_radius=6)
+        # Эффект свечения (glow) при наведении
+        if hover_start:
+            glow_rect = pygame.Rect(start_rect.x - 4, start_rect.y - 4,
+                                    start_rect.w + 8, start_rect.h + 8)
+            pygame.draw.rect(self.screen, (100, 255, 100, 60), glow_rect, border_radius=10)
+        # Основная кнопка с градиентом (темно-зеленый -> ярко-зеленый)
+        btn_color = (40, 160, 40) if not hover_start else (60, 200, 60)
+        self.draw_rounded_panel(
+            self.screen, start_rect.x, start_rect.y, start_rect.w, start_rect.h,
+            radius=9, bg_color=btn_color,
+            border_color=(200, 230, 200), border_width=2,
+        )
+        # Градиентный блик сверху
+        highlight = pygame.Surface((start_rect.w, start_rect.h // 2), pygame.SRCALPHA)
+        highlight.fill((255, 255, 255, 30 if not hover_start else 60))
+        self.screen.blit(highlight, (start_rect.x, start_rect.y))
         start_surf = self.font_small.render("Начать раунд (Enter)", True, (255, 255, 255))
         self.screen.blit(start_surf, start_surf.get_rect(center=start_rect.center))
 
@@ -1579,7 +1607,7 @@ class GameUI:
                             break
                     else:
                         # ── SHOP items ──
-                        for i, item in enumerate(shop_items[:10]):
+                        for i, item in enumerate(shop_items[:SHOP_CARD_COUNT]):
                             if item is None:
                                 continue
                             # Пересчитываем те же размеры карточек, что в отрисовке
@@ -1654,9 +1682,21 @@ class GameUI:
                                 if my < field_y0 + 30:
                                     pass
                                 else:
-                                    click_r = (my - field_y0 - 30) // (board_cell_h + BOARD_CELL_MARGIN)
-                                    click_c = (mx - field_x0) // (board_cell_w + BOARD_CELL_MARGIN)
-                                    if 0 <= click_r < 5 and 0 <= click_c < 5:
+                                    # Вычисляем ячейку через collidepoint с теми же rect, что и в отрисовке
+                                    click_r = click_c = None
+                                    for r in range(BOARD_ROWS):
+                                        for c in range(BOARD_COLS):
+                                            cell_left = field_x0 + c * (board_cell_w + BOARD_CELL_MARGIN) + 2
+                                            cell_top = field_y0 + 30 + r * (board_cell_h + BOARD_CELL_MARGIN) + 2
+                                            cell_rect = pygame.Rect(
+                                                cell_left, cell_top, board_cell_w - 4, board_cell_h - 4
+                                            )
+                                            if cell_rect.collidepoint(mx, my):
+                                                click_r, click_c = r, c
+                                                break
+                                        if click_r is not None:
+                                            break
+                                    if click_r is not None:
                                         cell_key = (click_r, click_c)
                                         # Найдём юнит на этой клетке
                                         unit_on_cell = None
@@ -1724,7 +1764,7 @@ class GameUI:
 
                 elif event.type == pygame.MOUSEBUTTONUP:
                     mx, my = event.pos
-                    # ── Если тащили юнт сベンча — разместить на клетке поля ──
+                    # ── Если тащили юнт с벤ча — разместить на клетке поля ──
                     if self.drag_bench_idx is not None:
                         field_x0 = self.width // 3 + 10
                         field_y0 = BOARD_Y0
@@ -1735,9 +1775,20 @@ class GameUI:
                         )
                         board_cell_h = board_cell_w
                         if my >= field_y0 + 30:
-                            click_r = (my - field_y0 - 30) // (board_cell_h + BOARD_CELL_MARGIN)
-                            click_c = (mx - field_x0) // (board_cell_w + BOARD_CELL_MARGIN)
-                            if 0 <= click_r < 5 and 0 <= click_c < 5:
+                            click_r = click_c = None
+                            for r in range(BOARD_ROWS):
+                                for c in range(BOARD_COLS):
+                                    cell_left = field_x0 + c * (board_cell_w + BOARD_CELL_MARGIN) + 2
+                                    cell_top = field_y0 + 30 + r * (board_cell_h + BOARD_CELL_MARGIN) + 2
+                                    cell_rect = pygame.Rect(
+                                        cell_left, cell_top, board_cell_w - 4, board_cell_h - 4
+                                    )
+                                    if cell_rect.collidepoint(mx, my):
+                                        click_r, click_c = r, c
+                                        break
+                                if click_r is not None:
+                                    break
+                            if click_r is not None:
                                 occupied = any(
                                     u.get("row") == click_r and u.get("col") == click_c
                                     for u in player.board
@@ -1781,9 +1832,20 @@ class GameUI:
                         board_cell_h = board_cell_w
                         placed = False
                         if my >= field_y0 + 30:
-                            click_r = (my - field_y0 - 30) // (board_cell_h + BOARD_CELL_MARGIN)
-                            click_c = (mx - field_x0) // (board_cell_w + BOARD_CELL_MARGIN)
-                            if 0 <= click_r < 5 and 0 <= click_c < 5:
+                            click_r = click_c = None
+                            for r in range(BOARD_ROWS):
+                                for c in range(BOARD_COLS):
+                                    cell_left = field_x0 + c * (board_cell_w + BOARD_CELL_MARGIN) + 2
+                                    cell_top = field_y0 + 30 + r * (board_cell_h + BOARD_CELL_MARGIN) + 2
+                                    cell_rect = pygame.Rect(
+                                        cell_left, cell_top, board_cell_w - 4, board_cell_h - 4
+                                    )
+                                    if cell_rect.collidepoint(mx, my):
+                                        click_r, click_c = r, c
+                                        break
+                                if click_r is not None:
+                                    break
+                            if click_r is not None:
                                 occupied = any(
                                     u.get("row") == click_r and u.get("col") == click_c
                                     for u in player.board
@@ -1988,72 +2050,132 @@ class GameUI:
             if not unit.alive:
                 continue  # dead units are drawn as faded
             x, y = positions[unit]
-            rect_x = x - 48   # карточка 96px — вписывается в клетку 100px
-            rect_y = y - 25
-            ability_name = unit.active_ability.get("name", "") if unit.active_ability else None
-            ability_cooldown = unit.ability_cooldown
-            ability_cooldown_max = unit.active_ability.get("cooldown", 0) if unit.active_ability else 0
-            self.draw_unit(
-                {"name": self.display_name(unit.name), "hp": unit.hp, "_base_hp": unit.max_hp},
-                rect_x, rect_y, PLAYER_COLOR, target=surf,
-                ability_name=ability_name,
-                ability_cooldown=ability_cooldown,
-                ability_cooldown_max=ability_cooldown_max,
+            # Цветной круг под ногами (индикатор команды)
+            self.draw_team_circle(surf, x, y + 4, 16, is_player=True)
+            # Крупный спрайт (SPRITE_FILL_RATIO от размера клетки боя)
+            sprite_size = 78
+            sprite_x = x - sprite_size // 2
+            sprite_y = y - 50  # выше центра клетки, чтобы место под HP bar
+            # Фон спрайта — цвет класса, чтобы юнит был виден даже без PNG
+            cls_name = getattr(unit, "unit_class", "warrior")
+            cls_bg = CLASS_BODY.get(cls_name, CLASS_BODY["warrior"])
+            pygame.draw.rect(surf, cls_bg,
+                             (sprite_x, sprite_y, sprite_size, sprite_size),
+                             border_radius=6)
+            draw_unit_sprite(
+                self.screen, sprite_x, sprite_y, sprite_size, sprite_size,
+                cls_name,
                 tier_color=self.tier_color(self.display_name(unit.name)),
-                unit_class=getattr(unit, "unit_class", "warrior"),
                 star=getattr(unit, "star", 1),
                 race=getattr(unit, "race", "human"),
-                rect_w=96, rect_h=50,
+            )
+            # Полоска здоровья под спрайтом
+            hp_pct = unit.hp / max(unit.max_hp, 1)
+            bar_w = 80
+            bar_h = 7
+            bar_x = x - bar_w // 2
+            bar_y = y + 22
+            self.draw_hp_bar(surf, bar_x, bar_y, bar_w, bar_h, hp_pct,
+                             fill_color=(60, 200, 60))
+            # Текст HP поверх полоски
+            hp_text = f"{int(unit.hp)}/{int(unit.max_hp)}"
+            self.draw_text_overlay(
+                self.screen, hp_text, self.font_tiny,
+                bar_x, bar_y - 14, bar_w, 14,
+                align="center",
+            )
+            # Имя юнита над спрайтом
+            name_text = self.display_name(unit.name)
+            self.draw_text_overlay(
+                self.screen, name_text, self.font_tiny,
+                sprite_x, sprite_y - 16, sprite_size, 14,
+                align="center",
             )
 
         for unit in enemy_units:
             if not unit.alive:
                 continue
             x, y = positions[unit]
-            rect_x = x - 48   # карточка 96px — вписывается в клетку 100px
-            rect_y = y - 25
-            ability_name = unit.active_ability.get("name", "") if unit.active_ability else None
-            ability_cooldown = unit.ability_cooldown
-            ability_cooldown_max = unit.active_ability.get("cooldown", 0) if unit.active_ability else 0
-            self.draw_unit(
-                {"name": self.display_name(unit.name), "hp": unit.hp, "_base_hp": unit.max_hp},
-                rect_x, rect_y, ENEMY_COLOR, target=surf,
-                ability_name=ability_name,
-                ability_cooldown=ability_cooldown,
-                ability_cooldown_max=ability_cooldown_max,
+            # Цветной круг под ногами (индикатор команды)
+            self.draw_team_circle(surf, x, y + 4, 16, is_player=False)
+            # Крупный спрайт
+            sprite_size = 78
+            sprite_x = x - sprite_size // 2
+            sprite_y = y - 50
+            # Фон спрайта — цвет класса
+            cls_name = getattr(unit, "unit_class", "warrior")
+            cls_bg = CLASS_BODY.get(cls_name, CLASS_BODY["warrior"])
+            pygame.draw.rect(surf, cls_bg,
+                             (sprite_x, sprite_y, sprite_size, sprite_size),
+                             border_radius=6)
+            draw_unit_sprite(
+                self.screen, sprite_x, sprite_y, sprite_size, sprite_size,
+                cls_name,
                 tier_color=self.tier_color(self.display_name(unit.name)),
-                unit_class=getattr(unit, "unit_class", "warrior"),
                 star=getattr(unit, "star", 1),
                 race=getattr(unit, "race", "human"),
-                rect_w=96, rect_h=50,
+            )
+            # Полоска здоровья под спрайтом
+            hp_pct = unit.hp / max(unit.max_hp, 1)
+            bar_w = 80
+            bar_h = 7
+            bar_x = x - bar_w // 2
+            bar_y = y + 22
+            self.draw_hp_bar(surf, bar_x, bar_y, bar_w, bar_h, hp_pct,
+                             fill_color=(200, 60, 60))
+            # Текст HP поверх полоски
+            hp_text = f"{int(unit.hp)}/{int(unit.max_hp)}"
+            self.draw_text_overlay(
+                self.screen, hp_text, self.font_tiny,
+                bar_x, bar_y - 14, bar_w, 14,
+                align="center",
+            )
+            # Имя юнита над спрайтом
+            name_text = self.display_name(unit.name)
+            self.draw_text_overlay(
+                self.screen, name_text, self.font_tiny,
+                sprite_x, sprite_y - 16, sprite_size, 14,
+                align="center",
             )
 
         # Draw dead units (faded)
-        # set_alpha на главной поверхности pygame не работает — прозрачность
-        # делаем затемнённым цветом карточки.
-        for unit in player_units:
-            if not unit.alive:
-                x, y = positions[unit]
-                self.draw_unit(
-                    {"name": self.display_name(unit.name), "hp": 0, "_base_hp": unit.max_hp},
-                    x - 48, y - 25, (45, 45, 55), target=surf,
-                    unit_class=getattr(unit, "unit_class", "warrior"),
-                    star=getattr(unit, "star", 1),
-                    race=getattr(unit, "race", "human"),
-                    rect_w=96, rect_h=50,
-                )
-
-        for unit in enemy_units:
-            if not unit.alive:
-                x, y = positions[unit]
-                self.draw_unit(
-                    {"name": self.display_name(unit.name), "hp": 0, "_base_hp": unit.max_hp},
-                    x - 48, y - 25, (45, 45, 55), target=surf,
-                    unit_class=getattr(unit, "unit_class", "warrior"),
-                    star=getattr(unit, "star", 1),
-                    race=getattr(unit, "race", "human"),
-                    rect_w=96, rect_h=50,
-                )
+        for unit in player_units + enemy_units:
+            if unit.alive:
+                continue
+            x, y = positions[unit]
+            # Круг под ногами затемнен
+            self.draw_team_circle(surf, x, y + 4, 14, is_player=unit in player_units)
+            # Крупный спрайт
+            sprite_size = 78
+            sprite_x = x - sprite_size // 2
+            sprite_y = y - 50
+            # Фон спрайта — затемненный цвет класса
+            cls_name = getattr(unit, "unit_class", "warrior")
+            cls_bg = CLASS_BODY.get(cls_name, CLASS_BODY["warrior"])
+            dead_bg = tuple(max(0, c - 60) for c in cls_bg)
+            pygame.draw.rect(surf, dead_bg,
+                             (sprite_x, sprite_y, sprite_size, sprite_size),
+                             border_radius=6)
+            # Рисуем спрайт с затемнением (темный оверлей)
+            draw_unit_sprite(
+                self.screen, sprite_x, sprite_y, sprite_size, sprite_size,
+                cls_name,
+                tier_color=(60, 60, 70),
+                star=getattr(unit, "star", 1),
+                race=getattr(unit, "race", "human"),
+            )
+            # Затемняющий оверлей
+            dead_overlay = pygame.Surface((sprite_size, sprite_size), pygame.SRCALPHA)
+            dead_overlay.fill((0, 0, 0, 160))
+            self.screen.blit(dead_overlay, (sprite_x, sprite_y))
+            # HP bar пустая
+            hp_pct = 0.0
+            bar_w = 80
+            bar_h = 7
+            bar_x = x - bar_w // 2
+            bar_y = y + 22
+            self.draw_hp_bar(surf, bar_x, bar_y, bar_w, bar_h, hp_pct,
+                             fill_color=(100, 100, 100))
 
         # Draw damage numbers on top of everything
         for dn in list(effects.get("damage_numbers", [])):
