@@ -53,11 +53,16 @@ def _load_sprite(unit_class: str) -> pygame.Surface:
     path = _ASSETS_DIR / filename
 
     try:
-        surf = pygame.image.load(str(path)).convert_alpha()
+        surf = pygame.image.load(str(path))
+        # Пробуем convert_alpha, если не получается — используем обычный Surface
+        try:
+            surf = surf.convert_alpha()
+        except Exception:
+            surf = surf.convert()
         _SPRITE_CACHE[unit_class] = surf
         return surf
-    except (pygame.error, FileNotFoundError):
-        # Если файла нет — возвращаем пустую поверхность, fallback на процедурку
+    except (pygame.error, FileNotFoundError, Exception):
+        # Если файла нет или не удалось загрузить — fallback на процедурку
         return None
 
 
@@ -195,7 +200,7 @@ def draw_unit_sprite(surf, x, y, w, h, unit_class, tier_color=None, star=1,
     else:
         # Fallback: процедурный силуэт, если PNG не загрузился
         _draw_fallback_sprite(surf, x, y, w, h, unit_class,
-                              body_color, accent_color, race)
+                              body_color, accent_color, race, tier_color)
 
     # Окантовка тира
     if tier_color:
@@ -214,12 +219,14 @@ def draw_unit_sprite(surf, x, y, w, h, unit_class, tier_color=None, star=1,
 
 
 def _draw_fallback_sprite(surf, x, y, w, h, unit_class,
-                          body_color=None, accent_color=None, race=None):
-    """Резервный процедурный спрайт, если PNG не загрузился."""
+                          body_color=None, accent_color=None, race=None,
+                          tier_color=None):
+    """Резервный процедурный спрайт, если PNG не загрузился.
+    Рисует детализированного персонажа с телом, головой, оружием и тенью."""
     cx = x + w // 2
     cy = y + h // 2
 
-    s = min(w, h) / 40.0
+    s = min(w, h) / 32.0  # увеличенный масштаб для лучшей видимости
     if s < 0.5:
         s = 0.5
 
@@ -234,14 +241,14 @@ def _draw_fallback_sprite(surf, x, y, w, h, unit_class,
     else:
         accent = accent_color
 
-    # Окантовка тира
-    if tier_color:
-        pygame.draw.rect(surf, tier_color, (x, y, w, h), width=2, border_radius=6)
+    # Тень под ногами
+    pygame.draw.ellipse(surf, (20, 20, 30),
+                        (cx - int(16 * s), cy + int(8 * s),
+                         int(32 * s), int(12 * s)))
 
-    # Тень тела
-    pygame.draw.ellipse(surf, (30, 30, 40),
-                        (cx - int(14 * s), cy + int(4 * s),
-                         int(28 * s), int(10 * s)))
+    # Окантовка тира (тонкая рамка вокруг всего спрайта)
+    if tier_color is not None:
+        pygame.draw.rect(surf, tier_color, (x, y, w, h), width=2, border_radius=6)
 
     if unit_class == "warrior":
         _draw_warrior(surf, cx, cy, s, body, accent, DETAIL)
@@ -254,63 +261,119 @@ def _draw_fallback_sprite(surf, x, y, w, h, unit_class,
 
 
 def _draw_warrior(surf, cx, cy, s, body, accent, detail):
+    # Туловище (броня)
     pygame.draw.rect(surf, body,
-                     (cx - int(10 * s), cy - int(8 * s),
-                      int(20 * s), int(18 * s)), border_radius=3)
-    pygame.draw.circle(surf, detail, (cx, cy - int(12 * s)), int(6 * s))
+                     (cx - int(11 * s), cy - int(9 * s),
+                      int(22 * s), int(20 * s)), border_radius=4)
+    # Детали брони (полосы)
     pygame.draw.line(surf, accent,
-                     (cx - int(6 * s), cy - int(4 * s)),
-                     (cx - int(10 * s), cy - int(14 * s)),
+                     (cx - int(9 * s), cy - int(6 * s)),
+                     (cx + int(9 * s), cy - int(6 * s)),
                      max(1, int(2 * s)))
+    pygame.draw.line(surf, accent,
+                     (cx - int(9 * s), cy + int(2 * s)),
+                     (cx + int(9 * s), cy + int(2 * s)),
+                     max(1, int(2 * s)))
+    # Голова
+    pygame.draw.circle(surf, detail, (cx, cy - int(13 * s)), int(7 * s))
+    # Глаза
+    pygame.draw.circle(surf, (0, 0, 0), (cx - int(3 * s), cy - int(14 * s)), max(1, int(1.5 * s)))
+    pygame.draw.circle(surf, (0, 0, 0), (cx + int(3 * s), cy - int(14 * s)), max(1, int(1.5 * s)))
+    # Меч (акцент)
     pygame.draw.rect(surf, accent,
-                     (cx - int(14 * s), cy - int(2 * s),
-                      int(8 * s), int(12 * s)), border_radius=2)
+                     (cx - int(15 * s), cy - int(3 * s),
+                      int(6 * s), int(16 * s)), border_radius=1)
+    pygame.draw.rect(surf, accent,
+                     (cx - int(16 * s), cy + int(10 * s),
+                      int(10 * s), int(4 * s)), border_radius=1)
+    # Ремень
     pygame.draw.line(surf, (60, 50, 40),
-                     (cx - int(6 * s), cy - int(8 * s)),
-                     (cx + int(6 * s), cy - int(8 * s)),
+                     (cx - int(7 * s), cy - int(8 * s)),
+                     (cx + int(7 * s), cy - int(8 * s)),
                      max(1, int(2 * s)))
 
 
 def _draw_mage(surf, cx, cy, s, body, accent, detail):
+    # Мантия (треугольник тела)
     points = [
-        (cx - int(12 * s), cy + int(6 * s)),
-        (cx + int(12 * s), cy + int(6 * s)),
-        (cx + int(8 * s), cy - int(10 * s)),
-        (cx - int(8 * s), cy - int(10 * s)),
+        (cx - int(13 * s), cy + int(7 * s)),
+        (cx + int(13 * s), cy + int(7 * s)),
+        (cx + int(9 * s), cy - int(11 * s)),
+        (cx - int(9 * s), cy - int(11 * s)),
     ]
     pygame.draw.polygon(surf, body, points)
-    pygame.draw.circle(surf, detail, (cx, cy - int(14 * s)), int(6 * s))
+    # Подробности мантии (полосы)
     pygame.draw.line(surf, accent,
-                     (cx + int(10 * s), cy - int(6 * s)),
-                     (cx + int(14 * s), cy - int(18 * s)),
+                     (cx - int(11 * s), cy - int(3 * s)),
+                     (cx + int(11 * s), cy - int(3 * s)),
                      max(1, int(2 * s)))
-    _draw_star(surf, cx + int(14 * s), cy - int(20 * s),
+    # Голова
+    pygame.draw.circle(surf, detail, (cx, cy - int(15 * s)), int(7 * s))
+    # Капюстон (треугольник над головой)
+    hood_points = [
+        (cx - int(9 * s), cy - int(15 * s)),
+        (cx + int(9 * s), cy - int(15 * s)),
+        (cx, cy - int(23 * s)),
+    ]
+    pygame.draw.polygon(surf, body, hood_points)
+    # Глаза (светятся для мага)
+    pygame.draw.circle(surf, (255, 255, 100), (cx - int(3 * s), cy - int(16 * s)), max(1, int(1.5 * s)))
+    pygame.draw.circle(surf, (255, 255, 100), (cx + int(3 * s), cy - int(16 * s)), max(1, int(1.5 * s)))
+    # Посох (акцент)
+    pygame.draw.line(surf, accent,
+                     (cx + int(11 * s), cy - int(7 * s)),
+                     (cx + int(15 * s), cy - int(22 * s)),
+                     max(1, int(2 * s)))
+    _draw_star(surf, cx + int(15 * s), cy - int(24 * s),
                max(2, int(3 * s)), accent)
+    # Пояс
     pygame.draw.line(surf, body,
-                     (cx - int(12 * s), cy - int(2 * s)),
-                     (cx - int(16 * s), cy + int(2 * s)),
+                     (cx - int(13 * s), cy - int(1 * s)),
+                     (cx - int(17 * s), cy + int(3 * s)),
                      max(1, int(3 * s)))
     pygame.draw.line(surf, body,
-                     (cx + int(12 * s), cy - int(2 * s)),
-                     (cx + int(16 * s), cy + int(2 * s)),
+                     (cx + int(13 * s), cy - int(1 * s)),
+                     (cx + int(17 * s), cy + int(3 * s)),
                      max(1, int(3 * s)))
 
 
 def _draw_archer(surf, cx, cy, s, body, accent, detail):
+    # Туловище (кожаная броня)
     pygame.draw.rect(surf, body,
-                     (cx - int(8 * s), cy - int(6 * s),
-                      int(16 * s), int(16 * s)), border_radius=2)
-    pygame.draw.circle(surf, detail, (cx, cy - int(10 * s)), int(5 * s))
+                     (cx - int(9 * s), cy - int(7 * s),
+                      int(18 * s), int(18 * s)), border_radius=3)
+    # Детали брони (ремни)
+    pygame.draw.line(surf, accent,
+                     (cx - int(7 * s), cy - int(4 * s)),
+                     (cx + int(7 * s), cy - int(4 * s)),
+                     max(1, int(2 * s)))
+    pygame.draw.line(surf, accent,
+                     (cx - int(7 * s), cy + int(2 * s)),
+                     (cx + int(7 * s), cy + int(2 * s)),
+                     max(1, int(2 * s)))
+    # Голова
+    pygame.draw.circle(surf, detail, (cx, cy - int(11 * s)), int(6 * s))
+    # Глаза
+    pygame.draw.circle(surf, (0, 0, 0), (cx - int(2.5 * s), cy - int(12 * s)), max(1, int(1.5 * s)))
+    pygame.draw.circle(surf, (0, 0, 0), (cx + int(2.5 * s), cy - int(12 * s)), max(1, int(1.5 * s)))
+    # Лук (акцент - дуга)
     pygame.draw.arc(surf, accent,
-                    (cx - int(14 * s), cy - int(10 * s),
-                     int(12 * s), int(20 * s)),
+                    (cx - int(15 * s), cy - int(12 * s),
+                     int(14 * s), int(22 * s)),
                     math.radians(200), math.radians(340),
                     max(1, int(2 * s)))
+    # Тетива лука
     pygame.draw.line(surf, accent,
                      (cx - int(8 * s), cy - int(10 * s)),
                      (cx - int(8 * s), cy + int(10 * s)),
                      max(1, int(1 * s)))
+    # Стрела
     pygame.draw.line(surf, detail,
-                     (cx + int(4 * s), cy - int(4 * s)),
-                     (cx + int(12 * s), cy - int(12 * s)),
+                     (cx + int(4 * s), cy - int(5 * s)),
+                     (cx + int(12 * s), cy - int(13 * s)),
+                     max(1, int(2 * s)))
+    # Пояс
+    pygame.draw.line(surf, (80, 60, 40),
+                     (cx - int(6 * s), cy - int(8 * s)),
+                     (cx + int(6 * s), cy - int(8 * s)),
                      max(1, int(2 * s)))

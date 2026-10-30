@@ -2084,11 +2084,11 @@ class GameUI:
                 bar_x, bar_y - 14, bar_w, 14,
                 align="center",
             )
-            # Имя юнита над спрайтом
+            # Имя юнита над спрайтом (крупный шрифт для читаемости)
             name_text = self.display_name(unit.name)
             self.draw_text_overlay(
-                self.screen, name_text, self.font_tiny,
-                sprite_x, sprite_y - 16, sprite_size, 14,
+                self.screen, name_text, self.font_small,
+                sprite_x, sprite_y - 22, sprite_size, 20,
                 align="center",
             )
 
@@ -2130,11 +2130,11 @@ class GameUI:
                 bar_x, bar_y - 14, bar_w, 14,
                 align="center",
             )
-            # Имя юнита над спрайтом
+            # Имя юнита над спрайтом (крупный шрифт для читаемости)
             name_text = self.display_name(unit.name)
             self.draw_text_overlay(
-                self.screen, name_text, self.font_tiny,
-                sprite_x, sprite_y - 16, sprite_size, 14,
+                self.screen, name_text, self.font_small,
+                sprite_x, sprite_y - 22, sprite_size, 20,
                 align="center",
             )
 
