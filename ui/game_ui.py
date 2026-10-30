@@ -2049,7 +2049,10 @@ class GameUI:
         for unit in player_units:
             if not unit.alive:
                 continue  # dead units are drawn as faded
-            x, y = positions[unit]
+            try:
+                x, y = positions[unit]
+            except KeyError:
+                continue  # юнит не найден в позициях (погиб в этой же тике)
             # Цветной круг под ногами (индикатор команды)
             self.draw_team_circle(surf, x, y + 4, 16, is_player=True)
             # Крупный спрайт (SPRITE_FILL_RATIO от размера клетки боя)
@@ -2070,7 +2073,10 @@ class GameUI:
                 race=getattr(unit, "race", "human"),
             )
             # Полоска здоровья под спрайтом
-            hp_pct = unit.hp / max(unit.max_hp, 1)
+            try:
+                hp_pct = unit.hp / max(unit.max_hp, 1)
+            except Exception:
+                hp_pct = 0.0
             bar_w = 80
             bar_h = 7
             bar_x = x - bar_w // 2
@@ -2095,7 +2101,10 @@ class GameUI:
         for unit in enemy_units:
             if not unit.alive:
                 continue
-            x, y = positions[unit]
+            try:
+                x, y = positions[unit]
+            except KeyError:
+                continue
             # Цветной круг под ногами (индикатор команды)
             self.draw_team_circle(surf, x, y + 4, 16, is_player=False)
             # Крупный спрайт
@@ -2116,7 +2125,10 @@ class GameUI:
                 race=getattr(unit, "race", "human"),
             )
             # Полоска здоровья под спрайтом
-            hp_pct = unit.hp / max(unit.max_hp, 1)
+            try:
+                hp_pct = unit.hp / max(unit.max_hp, 1)
+            except Exception:
+                hp_pct = 0.0
             bar_w = 80
             bar_h = 7
             bar_x = x - bar_w // 2
@@ -2142,7 +2154,10 @@ class GameUI:
         for unit in player_units + enemy_units:
             if unit.alive:
                 continue
-            x, y = positions[unit]
+            try:
+                x, y = positions[unit]
+            except KeyError:
+                continue
             # Круг под ногами затемнен
             self.draw_team_circle(surf, x, y + 4, 14, is_player=unit in player_units)
             # Крупный спрайт
@@ -2300,18 +2315,21 @@ class GameUI:
             # Способность: расширяющееся кольцо с названием
             if (etype.startswith("ability") or "ability_name" in event
                     or "caster_id" in event):
-                caster = find_unit(event.get("caster_id"))
-                if caster is not None and caster.alive:
-                    c_pos = positions.get(caster)
-                    if c_pos is not None:
-                        ability_name = event.get("ability_name", "Ability")
-                        # Тип берём из данных движка, а не угадываем по имени
-                        effect_type = event.get("ability_type") or "aoe_damage"
-                        effects["ability_effects"].append(
-                            AbilityEffect(c_pos[0], c_pos[1],
-                                          ability_name, effect_type))
-                        self.play_sound("ability")
-                        self.add_shake(2.5)
+                try:
+                    caster = find_unit(event.get("caster_id"))
+                    if caster is not None and caster.alive:
+                        c_pos = positions.get(caster)
+                        if c_pos is not None:
+                            ability_name = event.get("ability_name", "Ability")
+                            # Тип берём из данных движка, а не угадываем по имени
+                            effect_type = event.get("ability_type") or "aoe_damage"
+                            effects["ability_effects"].append(
+                                AbilityEffect(c_pos[0], c_pos[1],
+                                              ability_name, effect_type))
+                            self.play_sound("ability")
+                            self.add_shake(2.5)
+                except Exception:
+                    pass
 
     def wait_for_input(self):
         """Ждёт нажатия клавиши или клика мыши перед переходом к следующей фазе."""
