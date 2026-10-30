@@ -19,7 +19,7 @@ _PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from ui.sprites import draw_unit_sprite, draw_item_icon, draw_tooltip
+from ui.sprites import draw_unit_sprite, draw_item_icon, draw_tooltip, CLASS_BODY
 from game.core.team import build_combat_team
 
 # ── Раскладка фазы драфта: единая система масштабирования ──────────────────
