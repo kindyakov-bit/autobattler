@@ -1,0 +1,85 @@
+Ты старший Python-разработчик. Чини баги в UI автобатлера.
+
+ФАЙЛ: C:\AI\OpenCode Projects\autobattler\ui\game_ui.py (1627 строк, pygame-ce 2.5.8, Python 3.14)
+
+КОНТЕКСТ: STATE.md утверждает, что баги со скоростью и паузой исправлены, но на деле в методе run() они остались. Нужно исправить 5 багов.
+
+ЗАДАЧА: Сгенерируй Python-скрипт (patch.py), который:
+1. Читает файл game_ui.py
+2. Применяет точные замены строк (string.replace) для исправления всех багов ниже
+3. Сохраняет файл обратно
+
+БАГИ ДЛЯ ИСПРАВЛЕНИЯ:
+
+1. run() стр. 864: Удали мёртвый код speed_multiplier = 5
+   Старое:
+       speed_multiplier = 5  # how many ticks to process per frame (higher = faster)
+       ticks_per_frame = 1
+   Новое:
+       ticks_per_frame = 1
+
+2. run() строки 878-881: Добавь K_KP_PLUS/K_KP_MINUS в обработку клавиш (+/-)
+   Старое:
+       elif event.key in (pygame.K_PLUS, pygame.K_EQUALS):
+           ticks_per_frame = min(20, ticks_per_frame + 1)
+       elif event.key == pygame.K_MINUS:
+           ticks_per_frame = max(1, ticks_per_frame - 1)
+   Новое:
+       elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, getattr(pygame, 'K_KP_PLUS', None)):
+           ticks_per_frame = min(20, ticks_per_frame + 1)
+       elif event.key in (pygame.K_MINUS, getattr(pygame, 'K_KP_MINUS', None)):
+           ticks_per_frame = max(1, ticks_per_frame - 1)
+
+3. run() фаза battle: Добавь проверку paused перед обработкой тиков
+   Вставь ПОСЛЕ блока `if not sim:` и ПЕРЕД `total_ticks_final = ...`:
+       if paused:
+           self.clock.tick(30)
+           continue
+
+4. run() строки 1027 и 1047: Исправь NameError evt — attacker_team должен определяться из event, а не из evt
+   В ОБОИХ местах замени:
+       attacker_team = evt["attacker_team"]
+   На поиск команды атакующего через event.get("attacker_id"):
+       attacker_team = None
+       for u in sim.teams.get("player", []) + sim.teams.get("enemy", []):
+           if u.unit_id == event.get("attacker_id"):
+               attacker_team = u.team
+               break
+
+5. _animate_battle() строки 1431-1440: Добавь K_KP_PLUS/K_KP_MINUS
+   Старое:
+       elif getattr(event, 'key', None) in (pygame.K_PLUS, pygame.K_EQUALS):
+           old_speed = ticks_per_frame
+           ticks_per_frame = min(20, ticks_per_frame + 1)
+           print(f"Speed UP -> {ticks_per_frame}")
+           speed_display_timer = 60
+       elif getattr(event, 'key', None) == pygame.K_MINUS:
+           old_speed = ticks_per_frame
+           ticks_per_frame = max(1, ticks_per_frame - 1)
+           print(f"Speed DOWN -> {ticks_per_frame}")
+           speed_display_timer = 60
+   Новое:
+       elif getattr(event, 'key', None) in (pygame.K_PLUS, pygame.K_EQUALS, getattr(pygame, 'K_KP_PLUS', None)):
+           old_speed = ticks_per_frame
+           ticks_per_frame = min(20, ticks_per_frame + 1)
+           print(f"Speed UP -> {ticks_per_frame}")
+           speed_display_timer = 60
+       elif getattr(event, 'key', None) in (pygame.K_MINUS, getattr(pygame, 'K_KP_MINUS', None)):
+           old_speed = ticks_per_frame
+           ticks_per_frame = max(1, ticks_per_frame - 1)
+           print(f"Speed DOWN -> {ticks_per_frame}")
+           speed_display_timer = 60
+
+6. _animate_battle(): Исправь пропуск тиков визуала при ускорении
+   а) После `ticks_per_frame = 1` добавь `last_processed_tick = -1`
+   б) Замени условие `evt.get("tick") == tick_count:` на `last_processed_tick < evt.get("tick", 0) <= tick_count:`
+   в) Перед `tick_count += ticks_per_frame` добавь `last_processed_tick = tick_count`
+
+ПРИЕМКА:
+- python -m pytest tests/ -q → 101 passed
+- SPACE ставит на паузу в run()
+- +/- и numpad меняют скорость в run() и _animate_battle()
+- Нет NameError при пустых новых событиях атаки
+- speed_multiplier удалён
+
+ВЫВОД: Верни ТОЛЬКО содержимое patch.py, без markdown-блоков, без лишнего текста.

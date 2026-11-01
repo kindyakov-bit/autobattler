@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build / dist
+build/
+dist/
+*.egg-info/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Debug logs
+debug_log.txt
+debug_output.txt
+
+# Scratch / temporary
+_scratch/
+_race/
+
+# OpenCode internals
+.opencode/
+
+# Third-party binaries (MCP servers etc.)
+tools/
+
+# Node modules
+node_modules/
