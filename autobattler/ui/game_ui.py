@@ -548,6 +548,10 @@ class GameUI:
             self._icon_kills = pygame.image.load(str(_icons_dir / "icon_kills.png")).convert_alpha()
         except Exception:
             self._icon_kills = None
+        try:
+            self._icon_heal = pygame.image.load(str(_icons_dir / "icon_heal.png")).convert_alpha()
+        except Exception:
+            self._icon_heal = None
 
     # ── Вспомогательные методы отрисовки ───────────────────────────────
 
@@ -835,6 +839,30 @@ class GameUI:
                 star_str = STAR_CHAR * star if star > 1 else ""
                 line = f"{name}{star_str}  {k}x"
                 surf = self.font_tiny.render(line, True, (220, 220, 220))
+                self.screen.blit(surf, (panel_x + 70, cy - 4))
+                cy += 24
+            cy += 20
+
+        # ── Топ хиления ──
+        top_h = state.get("top_heal", [])
+        if top_h:
+            if self._icon_heal is not None:
+                icon_scaled = pygame.transform.smoothscale(self._icon_heal, (20, 20))
+                self.screen.blit(icon_scaled, (panel_x + 20, cy - 8))
+            top_h_label = self.font_small.render("Топ хиления:", True, (100, 255, 100))
+            self.screen.blit(top_h_label, (panel_x + 50, cy - 6))
+            cy += 24
+            for name, h, team, star in top_h:
+                base_name = name.split(" ")[0] if " " in name else name
+                unit_key = self._name_to_unit_key.get(base_name)
+                if unit_key:
+                    draw_unit_sprite(
+                        self.screen, panel_x + 30, cy - 4, 32, 32,
+                        "", unit_key=unit_key, star=1,
+                    )
+                star_str = STAR_CHAR * star if star > 1 else ""
+                line = f"{name}{star_str}  {h:.1f} HP"
+                surf = self.font_tiny.render(line, True, (150, 255, 150))
                 self.screen.blit(surf, (panel_x + 70, cy - 4))
                 cy += 24
             cy += 20
@@ -3083,6 +3111,7 @@ class GameUI:
             kills_by_team = {}
             dmg_by_unit = {}   # attacker_id -> damage
             kills_by_unit = {} # attacker_id -> kills
+            heal_by_unit = {}  # caster_id -> heal amount
             unit_names = {}    # unit_id -> (name, team, star)
             for team_name, units in sim.teams.items():
                 dmg_by_team[team_name] = 0
@@ -3116,6 +3145,10 @@ class GameUI:
                 ((unit_names[uid][0], k, unit_names[uid][1], unit_names[uid][2])
                  for uid, k in kills_by_unit.items()),
                 key=lambda x: x[1], reverse=True)[:3]
+            top_heal = sorted(
+                ((unit_names[uid][0], h, unit_names[uid][1], unit_names[uid][2])
+                 for uid, h in heal_by_unit.items()),
+                key=lambda x: x[1], reverse=True)[:3]
 
             state = {
                 "round_number": round_num,
@@ -3134,6 +3167,7 @@ class GameUI:
                 "kills_by_team": kills_by_team,
                 "top_damage": top_damage,
                 "top_kills": top_kills,
+                "top_heal": top_heal,
             }
             history.append(state)
             all_sims[round_num] = sim
@@ -3411,6 +3445,7 @@ class GameUI:
             kills_by_team = {}
             dmg_by_unit = {}
             kills_by_unit = {}
+            heal_by_unit = {}
             unit_names = {}
             for team_name, units in sim.teams.items():
                 dmg_by_team[team_name] = 0
@@ -3434,6 +3469,11 @@ class GameUI:
                         kills_by_team[killer_team] += 1
                     if attacker_id in unit_names:
                         kills_by_unit[attacker_id] = kills_by_unit.get(attacker_id, 0) + 1
+                elif etype == "ability_heal":
+                    heal_amount = e.get("heal", 0)
+                    caster_id = e.get("caster_id")
+                    if caster_id in unit_names:
+                        heal_by_unit[caster_id] = heal_by_unit.get(caster_id, 0) + heal_amount
 
             top_damage = sorted(
                 ((unit_names[uid][0], dmg, unit_names[uid][1], unit_names[uid][2])
@@ -3442,6 +3482,10 @@ class GameUI:
             top_kills = sorted(
                 ((unit_names[uid][0], k, unit_names[uid][1], unit_names[uid][2])
                  for uid, k in kills_by_unit.items()),
+                key=lambda x: x[1], reverse=True)[:3]
+            top_heal = sorted(
+                ((unit_names[uid][0], h, unit_names[uid][1], unit_names[uid][2])
+                 for uid, h in heal_by_unit.items()),
                 key=lambda x: x[1], reverse=True)[:3]
 
             history.append({
@@ -3459,6 +3503,7 @@ class GameUI:
                 "kills_by_team": kills_by_team,
                 "top_damage": top_damage,
                 "top_kills": top_kills,
+                "top_heal": top_heal,
             })
 
             if hp1 <= 0 or hp2 <= 0:
