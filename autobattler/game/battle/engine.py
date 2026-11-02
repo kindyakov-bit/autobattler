@@ -472,6 +472,22 @@ class BattleSimulator:
                 return True
         return False
 
+    def _cell_occupied_by_enemy(self, unit: Unit, row: int, col: int) -> bool:
+        """Проверка, занята ли клетка живым врагом."""
+        if not (0 <= row < BATTLE_ROWS and 0 <= col < TOTAL_COLS):
+            return False
+        for team_name, team_units in self.teams.items():
+            if team_name == unit.team:
+                continue
+            for eu in team_units:
+                if eu is not unit and eu.alive and eu.row == row and eu.col == col:
+                    return True
+        return False
+
+    def _cell_occupied(self, unit: Unit, row: int, col: int) -> bool:
+        """Проверка, занята ли клетка любым живым юнитом (союзником или врагом)."""
+        return self._cell_occupied_by_ally(unit, row, col) or self._cell_occupied_by_enemy(unit, row, col)
+
     def _move_towards(self, unit: Unit, target_row: int, target_col: int) -> None:
         """Сдвинуть юнита на одну клетку ближе к целевой позиции."""
         # Сначала по колонке (к врагу), потом по строке
@@ -518,7 +534,7 @@ class BattleSimulator:
 
         # Если всё ещё не нашли — любое свободное соседнее место
         if not any(
-            not self._cell_occupied_by_ally(unit, max(0, min(BATTLE_ROWS - 1, nr)), max(0, min(TOTAL_COLS - 1, nc)))
+            not self._cell_occupied(unit, max(0, min(BATTLE_ROWS - 1, nr)), max(0, min(TOTAL_COLS - 1, nc)))
             for nr, nc in candidates
             if (nr, nc) != (unit.row, unit.col)
         ):
@@ -533,7 +549,7 @@ class BattleSimulator:
             nc = max(0, min(TOTAL_COLS - 1, nc))
             if (nr, nc) == (unit.row, unit.col):
                 continue
-            if not self._cell_occupied_by_ally(unit, nr, nc):
+            if not self._cell_occupied(unit, nr, nc):
                 unit.row, unit.col = nr, nc
                 return
 

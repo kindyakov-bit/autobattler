@@ -3135,6 +3135,11 @@ class GameUI:
                         kills_by_team[killer_team] += 1
                     if attacker_id in unit_names:
                         kills_by_unit[attacker_id] = kills_by_unit.get(attacker_id, 0) + 1
+                elif etype == "ability_heal":
+                    heal_amount = e.get("heal", 0)
+                    caster_id = e.get("caster_id")
+                    if caster_id in unit_names:
+                        heal_by_unit[caster_id] = heal_by_unit.get(caster_id, 0) + heal_amount
 
             # Топ по урону и киллам
             top_damage = sorted(
@@ -3469,6 +3474,11 @@ class GameUI:
                         kills_by_team[killer_team] += 1
                     if attacker_id in unit_names:
                         kills_by_unit[attacker_id] = kills_by_unit.get(attacker_id, 0) + 1
+                elif etype == "ability_heal":
+                    heal_amount = e.get("heal", 0)
+                    caster_id = e.get("caster_id")
+                    if caster_id in unit_names:
+                        heal_by_unit[caster_id] = heal_by_unit.get(caster_id, 0) + heal_amount
                 elif etype == "ability_heal":
                     heal_amount = e.get("heal", 0)
                     caster_id = e.get("caster_id")
