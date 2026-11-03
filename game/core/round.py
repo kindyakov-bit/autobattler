@@ -1,0 +1,380 @@
+"""Игровой цикл: раунды, фазы, управление состоянием игры.
+
+Структура матча:
+  - Раунды 1-4: крип-раунды (игрок vs нейтральные юниты)
+  - Раунды 5+: PvP (игрок vs бот/другой игрок)
+
+Каждый раунд проходит фазы:
+  1. DRAFT — покупка юнитов из магазина
+  2. BATTLE — бой между командами
+  3. REWARD — начисление золота за результат
+"""
+
+import json
+import random
+import sys
+from pathlib import Path
+
+# Добавляем корень проекта в sys.path при прямом запуске
+_SCRIPT_DIR = Path(__file__).parent.parent.parent.resolve()
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
+from game.core.economy import round_economy
+from game.core.team import build_combat_team
+from game.battle.engine import BattleSimulator
+from game.core.shop import Shop
+from game.core.pool import Pool
+from game.core.draft import DraftPhase
+from game.core.player import Player
+
+
+class RoundState:
+    """Состояние одного раунда."""
+
+    def __init__(self, round_number: int, is_creep: bool):
+        self.round_number = round_number
+        self.is_creep = is_creep
+        self.gold_earned = 0
+        self.interest_earned = 0
+        self.total_gold_after = 0
+        self.battle_result = None
+        self.synergy_bonuses = {}
+
+
+class Game:
+    """Основной игровой цикл: раунды, экономика, бой."""
+
+    def __init__(self, seed: int = 42, unit_data: dict = None):
+        self.seed = seed
+        self.unit_data = unit_data  # data/units.json['units'] для пассивных способностей
+        self.round_number = 0
+        self.winner = None
+        self.history: list[RoundState] = []
+        self.all_sims: dict[int, object] = {}  # round_num -> BattleSimulator (all rounds)
+
+    def run_round(self, player_gold: int, player_units: list[dict],
+                  enemy_units: list[dict], synergy_data: dict,
+                  shop: object = None) -> RoundState:
+        """Запустить один раунд.
+
+        Args:
+            player_gold: золото игрока ДО раунда
+            player_units: юниты игрока (с полями hp, damage, attack_speed, range_, class)
+            enemy_units: юниты противника
+            synergy_data: данные синергий из JSON
+            shop: объект Shop для покупки юнитов в фазе драфта
+
+        Returns:
+            RoundState с результатами раунда.
+        """
+        self.round_number += 1
+        is_creep = self.round_number <= 4
+
+        state = RoundState(self.round_number, is_creep)
+
+        # Фаза 1: синергии и пассивки уже применены в build_combat_team() перед
+        # вызовом run_round — здесь не применяем повторно, иначе будет дубль.
+        state.synergy_bonuses = {}
+
+        # Фаза 2: бой
+        sim = BattleSimulator(seed=self.seed + self.round_number)
+
+        # Передаём активные способности и криты из JSON в юниты для симулятора
+        if self.unit_data:
+            for u in player_units:
+                name_base = u.get("name", "").split("★")[0]
+                if name_base in self.unit_data:
+                    ud = self.unit_data[name_base]
+                    if ud.get("active"):
+                        u["active"] = dict(ud["active"])
+                    u.setdefault("crit_chance", ud.get("crit_chance", 0))
+                    u.setdefault("unit_class", ud.get("class", ""))
+
+        sim.add_team("player", player_units)
+        sim.add_team("enemy", enemy_units)
+        self.all_sims[self.round_number] = sim
+        state.battle_result = sim.run()
+        # Сохраняем количество тиков для UI
+        state.total_ticks = sim.get_total_ticks()
+
+        pvp_win = not is_creep and state.battle_result["winner"] == "player"
+        creep_win = is_creep and state.battle_result["winner"] == "player"
+
+        # Фаза 3: экономика
+        econ = round_economy(gold=player_gold, pvp_win=pvp_win, creep_win=creep_win)
+        state.gold_earned = econ["income"]
+        state.interest_earned = econ["interest"]
+        state.total_gold_after = econ["gold_after"]
+
+        self.history.append(state)
+
+        # Проверяем конец матча (после 8 раундов — победитель по очкам)
+        if self.round_number >= 8:
+            self.winner = self._determine_match_winner()
+
+        return state
+
+    def _determine_match_winner(self) -> str:
+        """Определить победителя матча по результатам всех раундов."""
+        player_wins = sum(1 for s in self.history if s.battle_result["winner"] == "player")
+        enemy_wins = sum(1 for s in self.history if s.battle_result["winner"] != "player")
+
+        return "player" if player_wins > enemy_wins else "enemy"
+
+    def get_summary(self) -> str:
+        """Получить текстовую сводку матча."""
+        lines = ["=" * 50, "ИТОГИ МАТЧА", "=" * 50]
+
+        for state in self.history:
+            winner = state.battle_result["winner"] if state.battle_result else "?"
+            reason = state.battle_result.get("reason", "") if state.battle_result else ""
+
+            lines.append(
+                f"\nРаунд {state.round_number} "
+                f"({'крип' if state.is_creep else 'PvP'}): "
+                f"{winner} ({reason})"
+            )
+            lines.append(f"  Золото: +{state.gold_earned} (база) +{state.interest_earned}% (проценты)")
+
+        lines.append("\n" + "=" * 50)
+        if self.winner:
+            lines.append(f"ПОБЕДИТЕЛЬ МАТЧА: {self.winner.upper()}")
+        else:
+            lines.append("МАТЧ НЕ ЗАВЕРШЁН")
+
+        return "\n".join(lines)
+
+
+def load_game_data(json_path: str | Path) -> dict:
+    """Загрузить данные из JSON."""
+    with open(json_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+# Волны крипов по номеру раунда. Раньше крипы были одинаковы во всех
+# крип-раундах — три раунда подряд one and the same бой.
+# Сложность растёт и числом, и качеством юнитов.
+CREEP_WAVES: dict[int, list[str]] = {
+    1: ["warrior_freshman", "archer_scout"],
+    2: ["warrior_freshman", "warrior_freshman", "archer_scout"],
+    3: ["warrior_veteran", "warrior_freshman", "archer_scout", "archer_scout"],
+    6: ["warrior_veteran", "warrior_freshman", "archer_scout",
+        "archer_scout", "mage_acolyte"],
+}
+# Для раундов вне таблицы (9, 12, ...) — последняя волна + ещё юнит
+CREEP_FALLBACK_GROWTH = 1
+
+
+def creep_wave_for(round_num: int) -> list[str]:
+    """Состав волны крипов для раунда round_num."""
+    if round_num in CREEP_WAVES:
+        return list(CREEP_WAVES[round_num])
+    last_round = max(CREEP_WAVES)
+    wave = list(CREEP_WAVES[last_round])
+    extra = round_num // 3 - last_round // 3
+    for _ in range(max(0, extra) * CREEP_FALLBACK_GROWTH):
+        wave.append("warrior_veteran")
+    return wave
+
+
+def build_creep_units(round_num: int, all_units: dict,
+                      player_units: list[dict] | None = None,
+                      synergy_data: dict | None = None,
+                      race_synergy_data: dict | None = None,
+                      race_data: dict | None = None) -> list[dict]:
+    """Собрать врагов крип-раунда в формате для боя.
+
+    Качество волны растёт с номером раунда (CREEP_WAVES), а КОЛИЧЕСТВО
+    подстраивается под размер доски игрока: крипы — разминка, а не стена.
+    Слабый старт (2 юнита) не должен упираться в 4 крипов 3-го раунда,
+    иначе раунд выглядит тупиком. player_units=None → прежнее поведение.
+
+    Использует единую сборку build_combat_team для статов, расовых бонусов,
+    синергий и пассивок — как у игрока и ботов.
+    """
+    wave = creep_wave_for(round_num)
+    if player_units is not None:
+        target = max(1, min(len(player_units), 6))
+        if len(wave) > target:
+            wave = wave[:target]
+        elif len(wave) < target:
+            # добираем циклично юнитами той же волны — качество
+            # остаётся уровнем раунда, растёт только количество
+            base = list(wave)
+            i = 0
+            while len(wave) < target:
+                wave.append(base[i % len(base)])
+                i += 1
+    units_data = []
+    for key in wave:
+        ud = all_units.get(key)
+        if not ud:
+            continue
+        units_data.append({"name": key, "star": 1})
+    return build_combat_team(
+        units_data, all_units,
+        synergy_data=synergy_data,
+        race_synergy_data=race_synergy_data,
+        race_data=race_data,
+    )
+
+
+def _bot_draft_with_shop(bot, draft_phase: DraftPhase, unit_data: dict, gold: int, player: Player,
+                         synergy_data: dict | None = None,
+                         race_synergy_data: dict | None = None,
+                         race_data: dict | None = None) -> list[dict]:
+    """Бот покупает юнитов из магазина и размещает на доску.
+    
+    Returns:
+        Список юнитов в формате для боя (с star-уровнем).
+    """
+    
+    # Бот решает, что купить
+    draft_decision = bot.decide_draft(
+        available_units=unit_data,
+        gold=gold,
+        current_team=[],
+        synergy_data={},
+    )
+    
+    # Покупаем через Shop (с авто-мержем)
+    purchased = []
+    for unit_info in draft_decision:
+        name = unit_info["name"]
+        cost = unit_info.get("cost", 1)
+        if gold >= cost:
+            try:
+                merged_name = draft_phase.buy_unit(player, name)
+                purchased.append(merged_name)
+                gold -= cost
+            except Exception:
+                pass  # не хватило золота или пула
+    
+    # Размещаем на доску
+    board_units = []
+    for i, unit_name in enumerate(purchased[:6]):
+        try:
+            draft_phase.place_on_board(player, i)
+            board_units.append({"name": unit_name, "star": 1 if "★" not in unit_name else int(unit_name.split("★")[1][1:])})
+        except Exception:
+            pass
+    
+    # Преобразуем в формат для боя через единую сборку build_combat_team
+    enemy_units_data = [
+        {"name": pu, "star": 1 if "★" not in pu else int(pu.split("★")[1][1:])}
+        for pu in purchased[:6]
+    ]
+    enemy_unit_list = build_combat_team(
+        enemy_units_data, unit_data,
+        synergy_data=synergy_data,
+        race_synergy_data=race_synergy_data,
+        race_data=race_data,
+    )
+
+    if not enemy_unit_list:
+        enemy_unit_list = [
+            {"name": "warrior_freshman", "hp": 500, "damage": 40,
+             "attack_speed": 1.2, "range_": 1, "class": "warrior",
+             "crit_chance": 10},
+        ]
+    
+    return enemy_unit_list
+
+
+def run_match(seed: int = 42, verbose: bool = False, enemy_bot: str = "balanced"):
+    """Запустить полный матч (8 раундов).
+
+    Args:
+        seed: RNG seed для детерминизма
+        verbose: печатать каждый раунд
+        enemy_bot: пресет бота-противника (EASY/MEDIUM/HARD)
+    """
+    project_root = Path(__file__).parent.parent.parent.resolve()
+    data = load_game_data(project_root / "data" / "units.json")
+
+    # Загружаем все юниты из JSON для выбора ботом
+    all_units = data["units"]
+
+    game = Game(seed=seed, unit_data=all_units)
+    gold = 10  # стартовое золото (как в Dota Underlords / TFT)
+    
+    # Создаём пул и магазин на весь матч
+    unit_costs = {name: info["cost"] for name, info in all_units.items()}
+    pool = Pool(unit_costs)
+    shop = Shop(pool, unit_costs=unit_costs, rng=random.Random(seed))
+    draft_phase = DraftPhase(shop, all_units)
+
+    for round_num in range(1, 9):
+        is_creep = round_num <= 4
+
+        if is_creep:
+            # Крип-раунд: волна через build_combat_team (статы, расы, синергии)
+            enemy_units = build_creep_units(
+                round_num, all_units, synergy_data=data["synergies"],
+                race_synergy_data=data["race_synergies"], race_data=data["races"],
+            )
+            player_units = build_combat_team(
+                [
+                    {"name": "warrior_freshman", "star": 1},
+                    {"name": "mage_acolyte", "star": 1},
+                ],
+                all_units,
+                synergy_data=data["synergies"],
+                race_synergy_data=data["race_synergies"],
+                race_data=data["races"],
+            )
+        else:
+            # PvP-раунд: бот покупает юнитов из магазина через DraftPhase
+            from game.core.bots import create_bot
+            bot = create_bot(preset=enemy_bot, seed=seed + round_num)
+            
+            # Бот покупает и размещает юнитов
+            enemy_units = _bot_draft_with_shop(
+                bot=bot,
+                draft_phase=draft_phase,
+                unit_data=all_units,
+                gold=gold,
+                player=Player(gold=gold),
+                synergy_data=data["synergies"],
+                race_synergy_data=data["race_synergies"],
+                race_data=data["races"],
+            )
+
+            # Игрок тоже может выбрать состав (упрощённо — фиксированный)
+            player_units = build_combat_team(
+                [
+                    {"name": "warrior_freshman", "star": 1},
+                    {"name": "mage_acolyte", "star": 1},
+                ],
+                all_units,
+                synergy_data=data["synergies"],
+                race_synergy_data=data["race_synergies"],
+                race_data=data["races"],
+            )
+
+        state = game.run_round(
+            player_gold=gold,
+            player_units=list(player_units),
+            enemy_units=list(enemy_units),
+            synergy_data=data["synergies"],
+        )
+        gold = state.total_gold_after
+
+        if verbose:
+            print(f"\n--- Раунд {state.round_number} ({'крип' if state.is_creep else 'PvP'}) ---")
+            print(f"  Победитель: {state.battle_result['winner']}")
+            print(f"  Золото: +{state.gold_earned} (база) +{state.interest_earned}%")
+
+    return game
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Автобатлер — полный матч")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
+
+    game = run_match(seed=args.seed, verbose=args.verbose)
+    print(game.get_summary())
