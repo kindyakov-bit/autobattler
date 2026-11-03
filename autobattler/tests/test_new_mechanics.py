@@ -1,8 +1,8 @@
 """Тесты новых механик: уровень магазина, килл-бонус, мерж 3 копий.
 
-Экономика и магазин после правок 26.10.2026 (вечер):
-- Shop.level ограничивает потолок цен в ролле (1..6);
-- upgrade() поднимает уровень за золото игрока;
+Экономика и магазин после правок:
+- Shop.level привязан к уровню игрока (макс. 10);
+- upgrade() отключен — всегда возвращает False;
 - kill-бонус: KILL_GOLD_PER_UNIT за каждого убитого врага;
 - мерж 3 копий -> ★2 -> ★3 (существующее, здесь фиксируется поведением).
 """
@@ -26,15 +26,16 @@ def make_shop():
 
 
 class TestShopLevel:
-    """Уровень магазина ограничивает потолок цен в ролле."""
+    """Уровень магазина привязан к уровню игрока, ограничивает потолок цен в ролле."""
 
-    def test_level1_rolls_only_cost1(self):
+    def test_level1_rolls_only_cost1_and_cost2(self):
         shop = make_shop()
         shop.level = 1
-        for _ in range(50):
-            items = shop.roll(count=5)
-            for it in items:
-                assert it["cost"] <= 1
+        costs_seen = set()
+        for _ in range(100):
+            for it in shop.roll(count=5):
+                costs_seen.add(it["cost"])
+        assert max(costs_seen) <= 2, f"на уровне 1 не должно быть тира выше 2, получили: {costs_seen}"
 
     def test_level3_rolls_up_to_cost3(self):
         shop = make_shop()
@@ -43,33 +44,27 @@ class TestShopLevel:
             for it in shop.roll(count=5):
                 assert it["cost"] <= 3
 
-    def test_level6_rolls_everything(self):
+    def test_level10_rolls_everything(self):
         shop = make_shop()
-        shop.level = 6
+        shop.level = 10
         seen = {it["cost"] for _ in range(50) for it in shop.roll(count=5)}
         assert max(seen) == 5, "на максимальном уровне должны выпадать cost 5"
 
-    def test_upgrade_costs_gold(self):
-        from game.core.player import Player
+    def test_shop_level_clamped_to_10(self):
         shop = make_shop()
-        p = Player(gold=6)
-        assert shop.level == 1
-        assert shop.upgrade(p) is True
-        assert shop.level == 2
-        assert p.gold == 0, "апгрейд должен списать цену UPGRADE_COSTS[1]=6"
+        shop.level = 100
+        assert shop.level == 10
 
-    def test_upgrade_fails_without_gold(self):
+    def test_upgrade_always_false(self):
         from game.core.player import Player
         shop = make_shop()
-        p = Player(gold=1)
+        p = Player(gold=100)
         assert shop.upgrade(p) is False
-        assert shop.level == 1
-        assert p.gold == 1
+        assert shop.level == 1, "уровень магазина не меняется при апгрейде"
 
-    def test_upgrade_max_level(self):
+    def test_upgrade_cost_is_none(self):
         shop = make_shop()
-        shop.level = 6
-        assert shop.upgrade() is False, "выше 6 уровня апгрейда нет"
+        assert shop.upgrade_cost is None
 
 
 class TestKillGold:

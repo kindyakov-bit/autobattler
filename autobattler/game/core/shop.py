@@ -3,6 +3,10 @@
 import random
 
 
+#: Стоимость переброски витрины магазина (реролл).
+ROLL_COST = 2
+
+
 class ShopError(Exception):
     """Ошибка магазина."""
 
@@ -16,26 +20,28 @@ class Shop:
     """
 
     #: Максимальная стоимость юнита, который может выпасть на уровне N.
-    MAX_COST_BY_LEVEL = {1: 1, 2: 2, 3: 3, 4: 3, 5: 4, 6: 5}
+    MAX_COST_BY_LEVEL = {1: 1, 2: 2, 3: 3, 4: 3, 5: 3, 6: 4, 7: 4, 8: 5, 9: 5, 10: 5}
 
     #: Цена апгрейда магазина до следующего уровня (за золото).
-    UPGRADE_COSTS = {1: 6, 2: 8, 3: 10, 4: 12, 5: 14}
+    #: Отключено — уровень магазина привязан к уровню игрока.
+    UPGRADE_COSTS = {}
 
-    #: Количество слотов в витрине магазина по уровням.
-    SHOP_SLOTS = {1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 7: 6, 8: 6, 9: 7}
+    #: Количество слотов в витрине магазина — всегда 5 на любом уровне.
+    SHOP_SLOTS = {1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 7: 5, 8: 5, 9: 5, 10: 5}
 
-    #: Шансы выпадения юнита стоимости N (в %) для каждого уровня магазина.
-    #: Ключ — уровень магазина, значение — dict {стоимость: шанс}.
+    #: Шансы выпадения юнита стоимости N (в %) для каждого уровня игрока/магазина.
+    #: Ключ — уровень, значение — dict {стоимость: шанс}. Сумма = 100.
     TIER_ODDS = {
-        1: {1: 100, 2: 0,   3: 0,   4: 0,   5: 0},
-        2: {1: 80,  2: 20,  3: 0,   4: 0,   5: 0},
-        3: {1: 60,  2: 30,  3: 10,  4: 0,   5: 0},
-        4: {1: 45,  2: 35,  3: 20,  4: 0,   5: 0},
-        5: {1: 30,  2: 35,  3: 25,  4: 10,  5: 0},
-        6: {1: 20,  2: 30,  3: 30,  4: 15,  5: 5},
-        7: {1: 15,  2: 25,  3: 30,  4: 20,  5: 10},
-        8: {1: 10,  2: 20,  3: 30,  4: 25,  5: 15},
-        9: {1: 5,   2: 15,  3: 30,  4: 30,  5: 20},
+        1: {1: 80, 2: 20, 3: 0,   4: 0,   5: 0},
+        2: {1: 70, 2: 30, 3: 0,   4: 0,   5: 0},
+        3: {1: 55, 2: 35, 3: 10,  4: 0,   5: 0},
+        4: {1: 45, 2: 40, 3: 15,  4: 0,   5: 0},
+        5: {1: 35, 2: 40, 3: 25,  4: 0,   5: 0},
+        6: {1: 25, 2: 35, 3: 35,  4: 5,   5: 0},
+        7: {1: 20, 2: 30, 3: 40,  4: 10,  5: 0},
+        8: {1: 18, 2: 24, 3: 35,  4: 20,  5: 3},
+        9: {1: 15, 2: 21, 3: 30,  4: 28,  5: 6},
+        10: {1: 12, 2: 18, 3: 28,  4: 32,  5: 10},
     }
 
     def __init__(self, pool, unit_costs: dict = None, item_data: dict = None, rng: random.Random = None):
@@ -52,30 +58,21 @@ class Shop:
 
     @level.setter
     def level(self, value: int) -> None:
-        self._level = value
-        self.shop_slots = self.SHOP_SLOTS.get(value, 7)
+        self._level = max(1, min(value, 10))
+        self.shop_slots = self.SHOP_SLOTS.get(self._level, 5)
 
     @property
     def upgrade_cost(self):
-        """Цена следующего апгрейда (None = максимальный уровень)."""
-        return self.UPGRADE_COSTS.get(self.level)
+        """Цена следующего апгрейда. None — апгрейд отключен, уровень привязан к игроку."""
+        return None
 
     def upgrade(self, player=None) -> bool:
         """Поднять уровень магазина за золото игрока.
 
-        Возвращает True, если уровень вырос. Без player — бесплатное
-        повышение (используется автоматическим ростом по раундам).
+        Отключено — уровень магазина теперь привязан к уровню игрока.
+        Всегда возвращает False.
         """
-        if self.level >= max(self.MAX_COST_BY_LEVEL):
-            return False
-        if player is not None:
-            cost = self.UPGRADE_COSTS.get(self.level)
-            if cost is None or player.gold < cost:
-                return False
-            player.gold -= cost
-        self.level += 1
-        self.shop_slots = self.SHOP_SLOTS.get(self.level, 7)
-        return True
+        return False
 
     def _roll_candidates(self) -> list[str]:
         """Кандидаты ролла: юниты в пуле, чья цена <= потолка уровня."""
@@ -163,6 +160,18 @@ class Shop:
         count += sum(1 for u in player.board if u["name"] == target_name)
         return count
 
+    def _has_star3(self, player: object, unit_key: str) -> bool:
+        """Проверяет, есть ли у игрока уже ★3 этого юнита (макс. звёзды).
+
+        Если игрок уже собрал ★3, дополнительные копии не нужны.
+        """
+        if player is None:
+            return False
+        star3_name = f"{unit_key}★3"
+        if star3_name in player.reserve:
+            return True
+        return any(u["name"] == star3_name for u in player.board)
+
     def _remove_copies(self, player, target_name: str, count: int) -> int:
         """Удаляет count копий target_name из резерва и доски.
 
@@ -188,7 +197,7 @@ class Shop:
         return removed
 
     def _maybe_merge(self, player, name: str) -> str:
-        """Автоматически сливать 3 одинаковых в ★2, затем ★2+★2 в ★3, затем 3★2→★3.
+        """Автоматически сливать 3 одинаковых в ★2, затем 3★2 в ★3.
 
         Считает копии по ВСЕМ places: резерву (скамейке) и доске.
         Если юниты на доске — они убираются с доски (освобождая слоты),
@@ -208,27 +217,24 @@ class Shop:
             self.pool.refund(base_name, copies=2)
             returned_name = merged  # this call created a ★2
 
-        # 2 × ★2 → ★3
-        while self._count_copies(player, base_name + "★2") >= 2:
-            self._remove_copies(player, base_name + "★2", 2)
-            merged = base_name + "★3"
-            player.reserve.append(merged)
-            returned_name = merged  # this call created a ★3
-
-        # 3 × ★2 → ★3 (альтернативный путь)
+        # 3 × ★2 → ★3 (только этот путь; альтернативный 2★2→★3 удалён)
         while self._count_copies(player, base_name + "★2") >= 3:
             self._remove_copies(player, base_name + "★2", 3)
             merged = base_name + "★3"
             player.reserve.append(merged)
+            self.pool.refund(base_name + "★2", copies=2)
             returned_name = merged  # this call created a ★3
 
         return returned_name
 
-    def roll(self, count: int = None) -> list[dict]:
+    def roll(self, count: int = None, player: object = None) -> list[dict]:
         """Ролл магазина: случайные юниты из пула с учётом шансов tier.
 
         Количество карточек определяется shop_slots (зависит от уровня),
         если count не указан явно.
+
+        Если передан player, юниты с ★3 (макс. звёзды) исключаются из
+        розыгрыша, так как дополнительные копии не нужны.
         """
         if count is None:
             count = self.shop_slots
@@ -251,6 +257,7 @@ class Shop:
             candidates = [
                 u for u, c in self.unit_costs.items()
                 if c == target_cost and self.pool.available(u) > 0
+                and not self._has_star3(player, u)
             ]
             # Если нет юнитов этой стоимости, берём любую доступную
             if not candidates:

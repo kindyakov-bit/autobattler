@@ -2,12 +2,14 @@
 
 Структура матча:
   - Раунды 1-4: крип-раунды (игрок vs нейтральные юниты)
-  - Раунды 5+: PvP (игрок vs бот/другой игрок)
+  - Раунды 5+: PvP (игрок vs боты)
 
 Каждый раунд проходит фазы:
   1. DRAFT — покупка юнитов из магазина
   2. BATTLE — бой между командами
   3. REWARD — начисление золота за результат
+
+Игра продолжается до поражения HP игрока или всех ботов.
 """
 
 import json
@@ -20,7 +22,7 @@ _SCRIPT_DIR = Path(__file__).parent.parent.parent.resolve()
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-from game.core.economy import round_economy
+from game.core.economy import round_economy, START_HP
 from game.core.team import build_combat_team
 from game.battle.engine import BattleSimulator
 from game.core.shop import Shop
@@ -40,6 +42,9 @@ class RoundState:
         self.total_gold_after = 0
         self.battle_result = None
         self.synergy_bonuses = {}
+        self.player_hp = 0
+        self.bot_hps = {}  # bot_name -> hp
+        self.pairings = []  # list of (name1, name2, winner_name, damage_to_loser)
 
 
 class Game:
@@ -52,6 +57,71 @@ class Game:
         self.winner = None
         self.history: list[RoundState] = []
         self.all_sims: dict[int, object] = {}  # round_num -> BattleSimulator (all rounds)
+        self.player_hp = START_HP
+        self.bots: list[dict] = []  # persistent bots with hp, level, preset
+        # Добавляем первого бота
+        self._add_bot(seed)
+
+    def _add_bot(self, seed_base: int = 0) -> None:
+        """Добавить нового бота в игру."""
+        bot_level = self._bot_level_for_round(self.round_number + 1)
+        self.bots.append({
+            "hp": START_HP,
+            "level": bot_level,
+            "preset": "balanced",
+            "seed_base": seed_base + len(self.bots) * 1000,
+            "name": f"Бот {len(self.bots) + 1}",
+        })
+
+    @staticmethod
+    def _bot_level_for_round(round_num: int) -> int:
+        """Уровень бота по номеру раунда (для PvP, раунды 5+)."""
+        if round_num <= 6:
+            return 3
+        if round_num <= 8:
+            return 4
+        if round_num <= 11:
+            return 5
+        if round_num <= 14:
+            return 6
+        if round_num <= 18:
+            return 7
+        if round_num <= 22:
+            return 8
+        if round_num <= 27:
+            return 9
+        return 10
+
+    @staticmethod
+    def _base_damage_for_round(round_num: int) -> int:
+        """Базовый урон за проигрыш в PvP-раунде, растёт с номером раунда."""
+        if round_num <= 10:
+            return 5
+        if round_num <= 20:
+            return 10
+        if round_num <= 30:
+            return 15
+        return 20
+
+    def _is_game_over(self) -> bool:
+        """Проверить, завершена ли игра по HP."""
+        if self.player_hp <= 0:
+            self.winner = "enemy"
+            return True
+        living_bots = [b for b in self.bots if b["hp"] > 0]
+        if not living_bots:
+            self.winner = "player"
+            return True
+        return False
+
+    def _get_match_result(self) -> dict:
+        """Вернуть результат матча по HP."""
+        if self.player_hp <= 0:
+            living_bots = sum(1 for b in self.bots if b["hp"] > 0)
+            return {"winner": "enemy", "place": living_bots + 1, "reason": "player_hp_zero"}
+        if all(b["hp"] <= 0 for b in self.bots):
+            return {"winner": "player", "place": 1, "reason": "all_bots_dead"}
+        return {"winner": None, "place": None, "reason": "ongoing"}
 
     def run_round(self, player_gold: int, player_units: list[dict],
                   enemy_units: list[dict], synergy_data: dict,
@@ -73,8 +143,10 @@ class Game:
         is_creep = self.round_number <= 4
 
         state = RoundState(self.round_number, is_creep)
+        state.player_hp = self.player_hp
+        state.bot_hps = {b["name"]: b["hp"] for b in self.bots if b["hp"] > 0}
 
-        # Начисляем бесплатный опыт за раунд (+2 XP)
+        # Начисляем бесплатный опыт за раунд (+1 XP)
         if player is not None:
             player.add_round_xp()
 
@@ -100,32 +172,72 @@ class Game:
         sim.add_team("enemy", enemy_units)
         self.all_sims[self.round_number] = sim
         state.battle_result = sim.run()
-        # Сохраняем количество тиков для UI
         state.total_ticks = sim.get_total_ticks()
 
         pvp_win = not is_creep and state.battle_result["winner"] == "player"
         creep_win = is_creep and state.battle_result["winner"] == "player"
 
+        # Обновляем серии побед/поражений (только для PvP-раундов)
+        if player is not None and not is_creep:
+            if pvp_win:
+                player.record_win()
+            else:
+                player.record_loss()
+
+        # Для PvP-раундов: применяем урон по HP участникам
+        if not is_creep:
+            surviving_enemies = sum(
+                1 for u in sim.teams.get("enemy", []) if u.alive)
+            surviving_players = sum(
+                1 for u in sim.teams.get("player", []) if u.alive)
+            base_dmg = self._base_damage_for_round(self.round_number)
+
+            if pvp_win:
+                # Игрок выиграл — урон первому живому боту
+                for bot in self.bots:
+                    if bot["hp"] > 0:
+                        damage = base_dmg + 2 * surviving_enemies
+                        bot["hp"] = max(0, bot["hp"] - damage)
+                        state.pairings.append(("player", bot["name"], "player", damage))
+                        break
+            else:
+                # Игрок проиграл — урон игроку
+                damage = base_dmg + 2 * surviving_players
+                self.player_hp = max(0, self.player_hp - damage)
+                state.pairings.append(("player", "bot", "bot", damage))
+
         # Фаза 3: экономика
-        econ = round_economy(gold=player_gold, pvp_win=pvp_win, creep_win=creep_win)
+        econ = round_economy(
+            gold=player_gold,
+            pvp_win=pvp_win,
+            creep_win=creep_win,
+            is_creep=is_creep,
+            win_streak=player.win_streak if player is not None else 0,
+            loss_streak=player.loss_streak if player is not None else 0,
+        )
         state.gold_earned = econ["income"]
         state.interest_earned = econ["interest"]
         state.total_gold_after = econ["gold_after"]
 
         self.history.append(state)
 
-        # Проверяем конец матча (после 8 раундов — победитель по очкам)
-        if self.round_number >= 8:
-            self.winner = self._determine_match_winner()
+        # Проверяем конец матча по HP
+        self._is_game_over()
 
         return state
 
-    def _determine_match_winner(self) -> str:
-        """Определить победителя матча по результатам всех раундов."""
-        player_wins = sum(1 for s in self.history if s.battle_result["winner"] == "player")
-        enemy_wins = sum(1 for s in self.history if s.battle_result["winner"] != "player")
+    def _determine_match_winner(self) -> dict:
+        """Определить результат матча по HP."""
+        return self._get_match_result()
 
-        return "player" if player_wins > enemy_wins else "enemy"
+    def _get_match_result(self) -> dict:
+        """Вернуть результат матча по HP."""
+        if self.player_hp <= 0:
+            living_bots = sum(1 for b in self.bots if b["hp"] > 0)
+            return {"winner": "enemy", "place": living_bots + 1, "reason": "player_hp_zero"}
+        if all(b["hp"] <= 0 for b in self.bots):
+            return {"winner": "player", "place": 1, "reason": "all_bots_dead"}
+        return {"winner": None, "place": None, "reason": "ongoing"}
 
     def get_summary(self) -> str:
         """Получить текстовую сводку матча."""
@@ -192,8 +304,7 @@ def build_creep_units(round_num: int, all_units: dict,
 
     Качество волны растёт с номером раунда (CREEP_WAVES), а КОЛИЧЕСТВО
     подстраивается под размер доски игрока: крипы — разминка, а не стена.
-    Слабый старт (2 юнита) не должен упираться в 4 крипов 3-го раунда,
-    иначе раунд выглядит тупиком. player_units=None → прежнее поведение.
+    player_units=None → прежнее поведение.
 
     Использует единую сборку build_combat_team для статов, расовых бонусов,
     синергий и пассивок — как у игрока и ботов.
@@ -230,11 +341,11 @@ def _bot_draft_with_shop(bot, draft_phase: DraftPhase, unit_data: dict, gold: in
                          race_synergy_data: dict | None = None,
                          race_data: dict | None = None) -> list[dict]:
     """Бот покупает юнитов из магазина и размещает на доску.
-    
+
     Returns:
         Список юнитов в формате для боя (с star-уровнем).
     """
-    
+
     # Бот решает, что купить
     draft_decision = bot.decide_draft(
         available_units=unit_data,
@@ -242,7 +353,7 @@ def _bot_draft_with_shop(bot, draft_phase: DraftPhase, unit_data: dict, gold: in
         current_team=[],
         synergy_data={},
     )
-    
+
     # Покупаем через Shop (с авто-мержем)
     purchased = []
     for unit_info in draft_decision:
@@ -255,7 +366,7 @@ def _bot_draft_with_shop(bot, draft_phase: DraftPhase, unit_data: dict, gold: in
                 gold -= cost
             except Exception:
                 pass  # не хватило золота или пула
-    
+
     # Размещаем на доску
     board_units = []
     for i, unit_name in enumerate(purchased[:6]):
@@ -264,7 +375,7 @@ def _bot_draft_with_shop(bot, draft_phase: DraftPhase, unit_data: dict, gold: in
             board_units.append({"name": unit_name, "star": 1 if "★" not in unit_name else int(unit_name.split("★")[1][1:])})
         except Exception:
             pass
-    
+
     # Преобразуем в формат для боя через единую сборку build_combat_team
     enemy_units_data = [
         {"name": pu, "star": 1 if "★" not in pu else int(pu.split("★")[1][1:])}
@@ -283,17 +394,20 @@ def _bot_draft_with_shop(bot, draft_phase: DraftPhase, unit_data: dict, gold: in
              "attack_speed": 1.2, "range_": 1, "class": "warrior",
              "crit_chance": 10},
         ]
-    
+
     return enemy_unit_list
 
 
 def run_match(seed: int = 42, verbose: bool = False, enemy_bot: str = "balanced"):
-    """Запустить полный матч (8 раундов).
+    """Запустить полный матч до победы или поражения по HP.
 
     Args:
         seed: RNG seed для детерминизма
         verbose: печатать каждый раунд
         enemy_bot: пресет бота-противника (EASY/MEDIUM/HARD)
+
+    Returns:
+        Игровой объект Game с результатами матча.
     """
     project_root = Path(__file__).parent.parent.parent.resolve()
     data = load_game_data(project_root / "data" / "units.json")
@@ -302,8 +416,8 @@ def run_match(seed: int = 42, verbose: bool = False, enemy_bot: str = "balanced"
     all_units = data["units"]
 
     game = Game(seed=seed, unit_data=all_units)
-    gold = 10  # стартовое золото (как в Dota Underlords / TFT)
-    
+    gold = 5  # стартовое золото (как в Dota Underlords / TFT)
+
     # Создаём пул и магазин на весь матч
     unit_costs = {name: info["cost"] for name, info in all_units.items()}
     pool = Pool(unit_costs)
@@ -318,15 +432,14 @@ def run_match(seed: int = 42, verbose: bool = False, enemy_bot: str = "balanced"
     player = Player(gold=gold)
     player.update_max_board(shop.level)
 
-    for round_num in range(1, 9):
+    round_num = 0
+    while True:
+        round_num += 1
+        game.round_number = round_num
         is_creep = round_num <= 4
 
-        # Автоматический рост уровня магазина: +1 раз в два раунда (раунды 3, 5, 7)
-        if round_num > 1 and round_num % 2 == 1:
-            shop.level = min(shop.level + 1, 6)
-            player.update_max_board(shop.level)
-            if verbose:
-                print(f"  Магазин повышен до уровня {shop.level}, доска: {player.max_board} слотов")
+        # Уровень магазина привязан к уровню игрока — отдельного авто-рoste нет.
+        player.update_max_board(shop.level)
 
         if is_creep:
             # Крип-раунд: волна через build_combat_team (статы, расы, синергии)
@@ -348,7 +461,7 @@ def run_match(seed: int = 42, verbose: bool = False, enemy_bot: str = "balanced"
             # PvP-раунд: бот покупает юнитов из магазина через DraftPhase
             from game.core.bots import create_bot
             bot = create_bot(preset=enemy_bot, seed=seed + round_num)
-            
+
             # Бот покупает и размещает юнитов
             enemy_units = _bot_draft_with_shop(
                 bot=bot,
@@ -387,6 +500,12 @@ def run_match(seed: int = 42, verbose: bool = False, enemy_bot: str = "balanced"
             print(f"\n--- Раунд {state.round_number} ({'крип' if state.is_creep else 'PvP'}) ---")
             print(f"  Победитель: {state.battle_result['winner']}")
             print(f"  Золото: +{state.gold_earned} (база) +{state.interest_earned}%")
+            print(f"  HP игрока: {state.player_hp}")
+            for bot_name, bot_hp in state.bot_hps.items():
+                print(f"  HP {bot_name}: {bot_hp}")
+
+        if game.winner is not None:
+            break
 
     return game
 

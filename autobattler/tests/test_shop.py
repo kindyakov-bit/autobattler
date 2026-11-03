@@ -12,7 +12,7 @@ class TestMergeThreeUnits:
     """Покупка трёх одинаковых юнитов сливается в ★2."""
 
     def test_three_buys_merge(self):
-        pool = Pool({"warrior": 1})          # 29 копий, cost=1
+        pool = Pool({"warrior": 1})          # 30 копий, cost=1
         player = Player(gold=3)              # ровно на три покупки
         shop = Shop(pool)
 
@@ -31,10 +31,8 @@ class TestMergeThreeUnits:
         # в резерве ровно один ★2-юнит
         assert player.reserve == ["warrior★2"]
 
-        # пул: 29 − 1 (взяли) + 2 (вернули при merge) = 30? Нет.
-        # take() уменьшает на 1 каждый раз → 26 после трёх take.
-        # refund("warrior", copies=2) → 28.
-        assert pool.available("warrior") == 28
+        # пул: 30 − 3 (три take) + 2 (вернули при merge) = 29
+        assert pool.available("warrior") == 29
 
 
 # ---------- сценарий 2: недостаточно золота ----------
@@ -57,16 +55,16 @@ class TestPoolExhausted:
     """Когда все копии ушли — buy бросает ShopError."""
 
     def test_pool_exhausted(self):
-        pool = Pool({"warrior": 1})         # ровно 29 копий
+        pool = Pool({"warrior": 1})         # ровно 30 копий
         player = Player(gold=100)           # золота хватит на всё
         player.max_board = 100              # достаточно для теста, чтобы перекладывать на доску
         shop = Shop(pool)
 
         # Каждые 3 покупки сливаются в ★2 и возвращают 2 копии в пул.
         # После каждого цикла из 3-х покупок пул теряет ровно 1 копию.
-        # После 27 циклов (81 покупка) pool=2, затем ещё 2 take → pool=0.
-        # Итого: 83 покупки исчерпывают все копии.
-        for _ in range(83):
+        # После 28 циклов (84 покупка) pool=2, затем ещё 2 take → pool=0.
+        # Итого: 86 покупки исчерпывают все копии.
+        for _ in range(86):
             shop.buy(player, "warrior", cost=1)
             # Перекладываем на доску, чтобы резерв не переполнился (max_bench=20)
             if player.reserve and len(player.board) < player.max_board:
@@ -79,15 +77,15 @@ class TestPoolExhausted:
             shop.buy(player, "warrior", cost=1)
 
 
-# ---------- сценарий 4: ★3 merge (две ★2 → одна ★3) ----------
+# ---------- сценарий 4: ★3 merge (три ★2 → одна ★3) ----------
 
 class TestStar3Merge:
-    """Два ★2-юнита сливаются в один ★3."""
+    """Три ★2-юнита сливаются в один ★3."""
 
-    def test_two_star2_merge_to_star3(self):
-        """Создаём два ★2 юнита и сливаем их в ★3."""
+    def test_three_star2_merge_to_star3(self):
+        """Создаём три ★2 юнита и сливаем их в ★3."""
         pool = Pool({"warrior": 1})
-        player = Player(gold=6)  # 6 золотых: 3+3 для двух ★2
+        player = Player(gold=9)  # 9 золотых: 3×3 для трёх ★2
         shop = Shop(pool)
 
         # Создаём первый ★2 (три покупки)
@@ -101,16 +99,22 @@ class TestStar3Merge:
         r4 = shop.buy(player, "warrior", cost=1)
         r5 = shop.buy(player, "warrior", cost=1)
         r6 = shop.buy(player, "warrior", cost=1)
-        assert r6 == "warrior★3"  # ★2+★2 → ★3
+        assert player.reserve == ["warrior★2", "warrior★2"]
+
+        # Создаём третий ★2 (ещё три покупки) → слияние 3★2→★3
+        r7 = shop.buy(player, "warrior", cost=1)
+        r8 = shop.buy(player, "warrior", cost=1)
+        r9 = shop.buy(player, "warrior", cost=1)
+        assert r9 == "warrior★3"
 
         # В резерве ровно один ★3-юнит
         assert player.reserve == ["warrior★3"]
-        assert pool.available("warrior") == 27  # 29 - 3 (take для ★2) + 2 (refund) * 2 - 0 = 27
+        assert pool.available("warrior") == 27  # 30 - 9 (девять take ★1) + 6 (три merge refund по 2) = 27 ★1
 
-    def test_star3_reserves_two_star2(self):
-        """Создаём два ★2 мага и сливаем их в ★3."""
+    def test_star3_reserves_three_star2(self):
+        """Создаём три ★2 мага и сливаем их в ★3."""
         pool = Pool({"mage_acolyte": 1})
-        player = Player(gold=6)
+        player = Player(gold=9)
         shop = Shop(pool)
 
         # Создаём первый ★2 мага (три покупки)
@@ -119,9 +123,13 @@ class TestStar3Merge:
         assert "mage_acolyte★2" in player.reserve
 
         # Создаём второй ★2 мага (ещё три покупки)
-        result = shop.buy(player, "mage_acolyte", cost=1)  # 4-й: просто добавляем
-        result = shop.buy(player, "mage_acolyte", cost=1)  # 5-й: просто добавляем
-        result6 = shop.buy(player, "mage_acolyte", cost=1)  # 6-й: 3 base → ★2 + merge ★2+★2→★3
+        for _ in range(3):
+            shop.buy(player, "mage_acolyte", cost=1)
+        assert sum(1 for r in player.reserve if "mage_acolyte★2" in r) == 2
+
+        # Создаём третий ★2 мага (ещё три покупки) → слияние 3★2→★3
+        for _ in range(3):
+            shop.buy(player, "mage_acolyte", cost=1)
 
         assert "mage_acolyte★3" in player.reserve
 
@@ -129,16 +137,16 @@ class TestStar3Merge:
 # ---------- сценарий 5: цепочка merge (6 базовых → 2 ★2 → 1 ★3) ----------
 
 class TestChainMerge:
-    """Цепочка: 6 копий = 2×(3→★2), затем ★2+★2→★3."""
+    """Цепочка: 9 копий = 3×(3→★2), затем 3★2→★3."""
 
-    def test_six_base_to_star3(self):
-        """6 базовых юнитов → один ★3."""
+    def test_nine_base_to_star3(self):
+        """9 базовых юнитов → один ★3."""
         pool = Pool({"archer_scout": 1})
-        player = Player(gold=6)
+        player = Player(gold=9)
         shop = Shop(pool)
 
-        # Покупка 6 копий archer_scout (cost=1 каждая)
-        for i in range(6):
+        # Покупка 9 копий archer_scout (cost=1 каждая)
+        for i in range(9):
             result = shop.buy(player, "archer_scout", cost=1)
 
         # Должен остаться только ★3
@@ -198,7 +206,7 @@ class TestSellRefund:
         for _ in range(3):
             shop.buy(player, "warrior", cost=1)
 
-        assert pool.available("warrior") == 28  # после merge: 29-3+2=28
+        assert pool.available("warrior") == 29  # после merge: 30-3+2=29
 
         # Продаём ★2 из reserve
         base = shop.sell(player, 0)
@@ -206,7 +214,7 @@ class TestSellRefund:
         assert player.reserve == []
 
         # Пул должен увеличиться на 1 (вернули копию)
-        assert pool.available("warrior") == 29
+        assert pool.available("warrior") == 30
 
 
 # ---------- сценарий 8: place и remove ----------
@@ -292,17 +300,16 @@ class TestGetAvailableUnits:
 class TestStar3EdgeCases:
     """Граничные случаи для ★3."""
 
-    def test_star3_from_exact_two_star2(self):
-        """Ровно два ★2 → один ★3, без остатка."""
+    def test_star3_from_exact_three_star2(self):
+        """Ровно три ★2 → один ★3, без остатка."""
         pool = Pool({"warrior": 1})
-        player = Player(gold=6)
+        player = Player(gold=9)
         shop = Shop(pool)
 
-        # Создаём два ★2
+        # Создаём три ★2
         for _ in range(3):
-            shop.buy(player, "warrior", cost=1)
-        for _ in range(3):
-            shop.buy(player, "warrior", cost=1)
+            for _ in range(3):
+                shop.buy(player, "warrior", cost=1)
 
         assert player.reserve == ["warrior★3"]
         # Нет лишних ★2
@@ -311,8 +318,8 @@ class TestStar3EdgeCases:
     def test_four_star2_gives_one_star3_plus_one_star2(self):
         """Создаём 4★2 (12 базовых), проверяем итог.
         
-        С немедленным merge: каждые 2★2 сливаются в ★3 сразу,
-        поэтому после 12 покупок получаем 2×★3.
+        С немедленным merge: каждые 3★2 сливаются в ★3,
+        поэтому после 12 покупок получаем 1★3 + 1★2.
         """
         pool = Pool({"warrior": 1})
         player = Player(gold=12)
@@ -323,10 +330,11 @@ class TestStar3EdgeCases:
             for _ in range(3):
                 shop.buy(player, "warrior", cost=1)
 
-        # С немедленным merge: все ★2 сливаются в ★3 по мере создания
-        # Итог: 2×★3 (каждые 3 base → ★2, каждые 2★2 → ★3)
+        # 4★2 → 3★2 сливаются в ★3, остаётся 1★2
         star3_count = sum(1 for r in player.reserve if "★3" in r)
-        assert star3_count >= 1  # хотя бы один ★3 должен быть
+        star2_count = sum(1 for r in player.reserve if "★2" in r)
+        assert star3_count == 1, f"ожидался 1★3, получено {star3_count}"
+        assert star2_count == 1, f"ожидался 1★2, получено {star2_count}"
 
     def test_mixed_star_levels_no_cross_merge(self):
         """★1 и ★2 одного юнита НЕ сливаются в ★3 (нужны два ★2)."""

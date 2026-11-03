@@ -48,8 +48,8 @@ class TestGameBasicMatch:
         assert state.total_gold_after > 0
         assert len(game.history) == 1
 
-    def test_run_eight_rounds_determines_winner(self):
-        """8 раундов → матч завершён, winner определён."""
+    def test_run_rounds_until_game_over(self):
+        """Игра продолжается до поражения HP игрока или всех ботов."""
         game = Game(seed=200)
 
         player_units = [
@@ -61,13 +61,18 @@ class TestGameBasicMatch:
         synergy_data = {}
 
         gold = 10
-        for _ in range(8):
+        rounds_played = 0
+        for _ in range(50):  # максимум 50 раундов для предотвращения зацикливания
             state = game.run_round(gold, player_units, enemy_units, synergy_data)
             gold = state.total_gold_after
+            rounds_played += 1
+            if game.winner is not None:
+                break
 
         assert game.winner is not None
         assert game.winner in ("player", "enemy")
-        assert len(game.history) == 8
+        assert rounds_played > 0
+        assert len(game.history) == rounds_played
 
     def test_match_summary_contains_info(self):
         """Сводка матча содержит информацию о каждом раунде."""
@@ -79,6 +84,7 @@ class TestGameBasicMatch:
         enemy_units = [
             {"name": "v", "hp": 300, "damage": 25, "attack_speed": 1.0, "range_": 1, "class": "mage"},
         ]
+        synergy_data = {}
 
         for _ in range(8):
             game.run_round(10, player_units, enemy_units, {})
@@ -145,4 +151,4 @@ class TestRunMatch:
         from game.core.round import run_match
         game = run_match(seed=500, verbose=False)
         assert game.winner is not None
-        assert len(game.history) == 8
+        assert len(game.history) > 0

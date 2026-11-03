@@ -7,24 +7,25 @@ class Player:
     # Сколько опыта нужно для перехода с уровня N на N+1.
     # Ключ — текущий уровень, значение — XP до следующего.
     XP_TABLE = {
-        1: 2,   # 1 -> 2
-        2: 6,   # 2 -> 3
-        3: 10,  # 3 -> 4
-        4: 20,  # 4 -> 5
-        5: 36,  # 5 -> 6
-        6: 60,  # 6 -> 7
-        7: 90,  # 7 -> 8
-        8: 130, # 8 -> 9
+        1: 1,   # 1 -> 2
+        2: 1,   # 2 -> 3
+        3: 5,   # 3 -> 4
+        4: 15,  # 4 -> 5
+        5: 20,  # 5 -> 6
+        6: 25,  # 6 -> 7
+        7: 35,  # 7 -> 8
+        8: 40,  # 8 -> 9
+        9: 45,  # 9 -> 10
     }
 
-    MAX_LEVEL = 9
+    MAX_LEVEL = 10
 
-    # Стоимость покупки 4 опыта за золото
-    XP_COST_GOLD = 4
-    XP_PER_PURCHASE = 4
+    # Стоимость покупки опыта за золото: 5 золота = 5 XP
+    XP_COST_GOLD = 5
+    XP_PER_PURCHASE = 5
 
     # Бесплатный опыт за раунд
-    XP_PER_ROUND = 2
+    XP_PER_ROUND = 1
 
     def __init__(self, gold: int = 0):
         self.gold = gold
@@ -32,10 +33,12 @@ class Player:
         self.board: list[dict] = []         # на доске — {'name': str, 'star': int, ...}
         self.items: list[dict] = []         # инвентарь предметов
         self.max_bench = 20                 # макс. размер банка (соответствует BENCH_MAX в ui/game_ui.py)
-        self.level = 1                      # уровень игрока (1..9)
+        self.level = 1                      # уровень игрока (1..10)
         self.xp = 0                         # текущий опыт
         self.xp_to_next_level = self.XP_TABLE[1]  # опыта нужно до следующего уровня
-        self.max_board = self.level + 1     # макс. юнитов на доске = level + 1
+        self.max_board = self.level         # макс. юнитов на доске = level
+        self.win_streak = 0                 # серия побед подряд
+        self.loss_streak = 0                # серия поражений подряд
 
     def add_xp(self, amount: int) -> bool:
         """Добавить опыт. Возвращает True, если уровень повысился."""
@@ -47,12 +50,12 @@ class Player:
             self.xp -= self.xp_to_next_level
             self.level += 1
             self.xp_to_next_level = self.XP_TABLE.get(self.level, 999999)
-            self.max_board = self.level + 1
+            self.max_board = self.level
             leveled_up = True
         return leveled_up
 
     def buy_xp(self, cost: int = None, xp_amount: int = None) -> bool:
-        """Купить опыт за золото. По умолчанию 4 золота за 4 XP.
+        """Купить опыт за золото. По умолчанию 5 золота за 5 XP.
 
         Возвращает True, если покупка успешна.
         """
@@ -66,6 +69,19 @@ class Player:
         self.add_xp(xp_amount)
         return True
 
+    def record_win(self) -> None:
+        """Записать победу: увеличить win_streak, сбросить loss_streak.
+        Серия побед сбрасывается на 0 при достижении 8."""
+        self.win_streak += 1
+        self.loss_streak = 0
+        if self.win_streak >= 8:
+            self.win_streak = 0
+
+    def record_loss(self) -> None:
+        """Записать поражение: увеличить loss_streak, сбросить win_streak."""
+        self.loss_streak += 1
+        self.win_streak = 0
+
     def add_round_xp(self) -> bool:
         """Дать бесплатный опыт за начало раунда. Возвращает True, если уровень повысился."""
         return self.add_xp(self.XP_PER_ROUND)
@@ -73,11 +89,11 @@ class Player:
     def update_max_board(self, shop_level: int) -> None:
         """Обновить максимальный размер доски.
 
-        Уровень игрока определяет лимит: level + 1 слота.
+        Уровень игрока определяет лимит: level слотов.
         shop_level оставлен для обратной совместимости, но не влияет на max_board.
         """
         self._board_level = shop_level
-        self.max_board = self.level + 1
+        self.max_board = self.level
 
     def buy(self, name: str) -> None:
         """Положить юнит в резерв (без списания золота — делает Shop)."""

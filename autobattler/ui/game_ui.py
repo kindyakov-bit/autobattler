@@ -22,6 +22,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 from ui.sprites import draw_unit_sprite, draw_item_icon, draw_tooltip, preload_sprites, preload_unit_sprites, load_ui_texture
 from game.core.team import build_combat_team
 from game.core.player import Player
+from game.core.shop import ROLL_COST
 
 # ── Раскладка фазы драфта: единая система масштабирования ──────────────────
 # Все размеры вычисляются от констант ниже. Хитбоксы и рисование используют
@@ -1059,11 +1060,11 @@ class GameUI:
         hover_reroll = reroll_rect.collidepoint(mx, my)
         pygame.draw.rect(self.screen, (80, 120, 160) if not hover_reroll else (120, 160, 200),
                          reroll_rect, border_radius=4)
-        rr_surf = self.font_tiny.render("Reroll ($1)", True, (255, 255, 255))
+        rr_surf = self.font_tiny.render(f"Reroll (${ROLL_COST})", True, (255, 255, 255))
         self.screen.blit(rr_surf, rr_surf.get_rect(center=reroll_rect.center))
         if hover_reroll:
             draw_tooltip(self.screen, right_panel_x, right_panel_y + right_panel_h + 4,
-                         "Перебросить витрину магазина\nза 1 золото (клавиша R)", self.font_tiny)
+                         f"Перебросить витрину магазина\nза {ROLL_COST} золота (клавиша R)", self.font_tiny)
 
         # Кнопка покупки опыта (Level Up) — под кнопкой реролла
         lvlup_rect = pygame.Rect(right_panel_x + 10, right_panel_y + 40, right_panel_w - 20, 26)
@@ -1102,11 +1103,12 @@ class GameUI:
             xp_surf = self.font_tiny.render(f"{player.xp}/{player.xp_to_next_level}", True, pl_color)
             self.screen.blit(xp_surf, xp_surf.get_rect(center=(player_lvl_rect.centerx, player_lvl_rect.y + 20)))
 
-        # Уровень магазина: иконка + текст + клик по иконке — апгрейд за золото
+        # Уровень магазина привязан к уровню игрока.
         if shop is not None:
             lvl = shop.level
-            up_cost = shop.upgrade_cost
-            up_text = f"upgrade(${up_cost})" if up_cost else "max"
+            # Апгрейд отключен — уровень магазина равен уровню игрока.
+            up_cost = None
+            up_text = ""
             max_cost = shop.MAX_COST_BY_LEVEL.get(lvl, 1)
             unit_candidates = [u for u, c in shop.unit_costs.items()
                                if c <= max_cost and shop.pool.available(u) > 0]
@@ -1115,7 +1117,7 @@ class GameUI:
         else:
             lvl = 1
             up_cost = None
-            up_text = "max"
+            up_text = ""
             unit_chance_pct = 0
             item_chance_pct = 0
 
@@ -1149,10 +1151,7 @@ class GameUI:
 
         if hover_lvl:
             tip = f"Уровень магазина {lvl}\nШанс юнита: {unit_chance_pct}%\n"
-            if up_cost is not None:
-                tip += f"Апгрейд: ${up_cost} (клик)\n"
-            else:
-                tip += "Макс. уровень\n"
+            tip += "Уровень привязан к игроку\n"
             tip += f"Шанс предмета: {item_chance_pct}%"
             draw_tooltip(self.screen, right_panel_x, right_panel_y + right_panel_h + 4,
                          tip, self.font_tiny)
@@ -1309,7 +1308,7 @@ class GameUI:
         pygame.draw.rect(self.screen, (40, 70, 40),
                          (field_x0, field_y0, field_w, field_h), border_radius=8)
         # Заголовок поля с динамическим лимитом доски (зависит от уровня игрока)
-        board_limit = player.level + 1 if hasattr(player, 'level') else 6
+        board_limit = player.level if hasattr(player, 'level') else 6
         board_title = self.font_small.render(
             f"ПОЛЕ ({len(player.board)}/{board_limit})",
             True, (200, 200, 200))
@@ -1555,7 +1554,7 @@ class GameUI:
 
         Количество карточек юнитов определяется shop.shop_slots.
         """
-        unit_items = shop.roll()
+        unit_items = shop.roll(count=count, player=self.player)
         try:
             item_items = shop.roll_items(count=item_count)
             # Добавляем префикс 'ITEM:' для предметов чтобы различать
@@ -1598,15 +1597,6 @@ class GameUI:
         rng = random.Random(seed + round_num * 100)
         pool = Pool(unit_costs)
         shop = Shop(pool, unit_costs=unit_costs, item_data=items_data.get("items", {}), rng=rng)
-
-        # Уровень магазина переживает раунды: авто-рост каждый раунд
-        # (кроме первого) + докупка за золото клавишей U
-        if not hasattr(self, "shop_level"):
-            self.shop_level = 1
-        if round_num > 1:
-            # авто-рост: каждый новый раунд магазин подрастает (макс. 6)
-            self.shop_level = min(6, self.shop_level + 1)
-        shop.level = self.shop_level
         draft_phase = DraftPhase(shop, all_units)
 
         self.all_units = all_units  # Для отображения имён на русском в магазине
@@ -1615,14 +1605,17 @@ class GameUI:
         for key, ud in self.all_units.items():
             self._name_to_unit_key[ud.get("name", key)] = key
 
-        gold = 10 if existing_units is None else existing_units.get("gold", 10)
+        gold = 5 if existing_units is None else existing_units.get("gold", 5)
         player_level = existing_units.get("level", 1) if existing_units else 1
         player_xp = existing_units.get("xp", 0) if existing_units else 0
         player = Player(gold=gold)
         player.level = player_level
+        shop.level = player.level
         player.xp = player_xp
         player.xp_to_next_level = player.XP_TABLE.get(player.level, 999999)
-        player.max_board = player.level + 1
+        player.max_board = player.level
+        player.win_streak = existing_units.get("win_streak", 0) if existing_units else 0
+        player.loss_streak = existing_units.get("loss_streak", 0) if existing_units else 0
         self.player = player  # сохраняем для отображения уровня/XP в HUD
 
         if existing_units is None:
@@ -1716,8 +1709,8 @@ class GameUI:
                         break
 
                     elif key == pygame.K_r:
-                        if player.gold >= 1:
-                            player.gold -= 1
+                        if player.gold >= ROLL_COST:
+                            player.gold -= ROLL_COST
                             try:
                                 # роллим и юнитов, и предметы — иначе после
                                 # нажатия R из магазина пропадали предметы
@@ -1734,15 +1727,8 @@ class GameUI:
                             pass
 
                     elif key == pygame.K_u:
-                        # Апгрейд магазина за золото (механика прокачки)
-                        if shop.upgrade(player):
-                            self.shop_level = shop.level
-                            self.play_sound("gold")
-                            try:
-                                shop_items = self._mixed_roll(
-                                    shop, count=5, item_count=3)
-                            except Exception:
-                                pass
+                        # Апгрейд магазина отключен — уровень привязан к игроку.
+                        pass
 
                     elif key == pygame.K_w:
                         # Shop.buy() уже списывает золото — второй раз не вычитаем
@@ -1835,8 +1821,8 @@ class GameUI:
                     # ── Кнопка реролла магазина (клик мышью) ──
                     reroll_rect = pygame.Rect(self.width - 120, 93, 95, 26)
                     if reroll_rect.collidepoint(mx, my):
-                        if player.gold >= 1:
-                            player.gold -= 1
+                        if player.gold >= ROLL_COST:
+                            player.gold -= ROLL_COST
                             try:
                                 shop_items = self._mixed_roll(
                                     shop, count=5, item_count=3)
@@ -1861,18 +1847,10 @@ class GameUI:
                         self.selected_shop_idx = None
                         self.selected_bench_idx = None
                         break
-                    # ── Иконка уровня магазина: клик — апгрейд за золото ──
+                    # Иконка уровня магазина — клик не ведет к апгрейду (уровень привязан к игроку).
                     if (self.lvl_icon_rect
                             and self.lvl_icon_rect.collidepoint(mx, my)
                             and shop is not None):
-                        if shop.upgrade(player):
-                            self.shop_level = shop.level
-                            self.play_sound("gold")
-                            try:
-                                shop_items = self._mixed_roll(
-                                    shop, count=5, item_count=3)
-                            except Exception:
-                                pass
                         self.selected_shop_idx = None
                         self.selected_bench_idx = None
                         break
@@ -2253,7 +2231,7 @@ class GameUI:
             }
             for u in player.board
         ]
-        return player_units, player.gold, player.items, list(player.reserve), board_format, player.level, player.xp
+        return player_units, player.gold, player.items, list(player.reserve), board_format, player.level, player.xp, player.win_streak, player.loss_streak
 
     def _get_unit_positions(self, player_units, enemy_units):
         """Позиции на едином тактическом поле 10×5: игрок cols 0-4, враг cols 5-9."""
@@ -2976,10 +2954,13 @@ class GameUI:
         
         BG_COLOR = (20, 20, 30)
 
-        gold = 10
-        hp = START_HP
+        gold = 5
         player_level = 1
         player_xp = 0
+        self.player = None
+        self.player_hp = START_HP
+        self.bot_hp = START_HP
+        self.bot_level = 1
         history = []  # list of round result dicts
         all_sims = {}  # round_num -> BattleSimulator
         # Купленные юниты, предметы и скамейка между раундами.
@@ -2988,7 +2969,9 @@ class GameUI:
         stored_player_items = None
         stored_player_reserve = None  # имена с ★N: ["warrior_freshman", "archer_scout★2", ...]
 
-        for round_num in range(1, 9):
+        round_num = 0
+        while True:
+            round_num += 1
             # Раунды 1-3 — крипы, потом каждый третий (6, 9, ...) — крип, остальные — PvP
             is_creep = round_num <= 3 or round_num % 3 == 0
 
@@ -3002,6 +2985,8 @@ class GameUI:
                 "reserve": stored_player_reserve,
                 "level": player_level,
                 "xp": player_xp,
+                "win_streak": self.player.win_streak if self.player is not None else 0,
+                "loss_streak": self.player.loss_streak if self.player is not None else 0,
             } if stored_player_units else None
             result = self._run_interactive_draft(
                 round_num=round_num,
@@ -3012,7 +2997,7 @@ class GameUI:
             )
             if result is None:
                 return  # user quit
-            player_units, gold, stored_items, stored_player_reserve, stored_player_units, player_level, player_xp = result
+            player_units, gold, stored_items, stored_player_reserve, stored_player_units, player_level, player_xp, player_win_streak, player_loss_streak = result
             # stored_player_units теперь формат доски (name/star/row/col),
             # а не боевой формат (hp/damage/...) — пригоден для восстановления
             stored_player_items = stored_items
@@ -3083,26 +3068,59 @@ class GameUI:
             sim.add_team("enemy", enemy_units)
             battle_result = sim.run()
             total_ticks = sim.get_total_ticks()
-            
-            # Economy + HP: проигранный PvP бьёт тем сильнее,
+
+            # Economy: проигранный PvP бьёт тем сильнее,
             # чем больше врагов уцелело
             pvp_win = not is_creep and battle_result["winner"] == "player"
             creep_win = is_creep and battle_result["winner"] == "player"
-            surviving_enemies = sum(
-                1 for u in sim.teams.get("enemy", []) if u.alive)
-            # Килл-бонус: +1 золота за каждого убитого врага
-            # (kill и ability_kill с killer_team=player)
+
+            # PvP HP damage: проигранный боец теряет HP
+            # Базовый урон растёт с номером раунда
+            base_dmg = 5
+            if round_num <= 10:
+                base_dmg = 5
+            elif round_num <= 20:
+                base_dmg = 10
+            elif round_num <= 30:
+                base_dmg = 15
+            else:
+                base_dmg = 20
+
+            if not is_creep:
+                surviving_enemies = sum(
+                    1 for u in sim.teams.get("enemy", []) if u.alive)
+                surviving_players = sum(
+                    1 for u in sim.teams.get("player", []) if u.alive)
+
+                if pvp_win:
+                    # Игрок выиграл — урон боту
+                    damage = base_dmg + 2 * surviving_enemies
+                    self.bot_hp = max(0, self.bot_hp - damage)
+                    hp_lost = 0
+                else:
+                    # Игрок проиграл — урон игроку
+                    damage = base_dmg + 2 * surviving_players
+                    self.player_hp = max(0, self.player_hp - damage)
+                    hp_lost = damage
+            else:
+                surviving_enemies = 0
+                hp_lost = 0
+
+            creep_win = is_creep and battle_result["winner"] == "player"
             kills = sum(1 for e in sim.log
                         if e.get("type") in ("kill", "ability_kill")
                         and e.get("killer_team") == "player")
             kill_gold = KILL_GOLD_PER_UNIT * kills
             econ = round_economy(
                 gold=gold, pvp_win=pvp_win, creep_win=creep_win,
-                hp=hp, is_creep=is_creep,
-                surviving_enemy_units=surviving_enemies)
+                is_creep=is_creep,
+                surviving_enemy_units=surviving_enemies,
+                win_streak=self.player.win_streak,
+                loss_streak=self.player.loss_streak,
+            )
             gold = econ["gold_after"] + kill_gold
-            hp = econ["hp_after"]
-            eliminated = econ["is_eliminated"]
+            # HP управляется вручную (self.player_hp, self.bot_hp), не через econ
+            eliminated = self.player_hp <= 0
 
             # ── Детальная статистика боя ───────────────────────────────────
             # Урон, киллы и топ юнитов из sim.log
@@ -3161,8 +3179,8 @@ class GameUI:
                 "interest_earned": econ["interest"],
                 "kill_gold": kill_gold,
                 "total_gold_after": gold,
-                "hp": hp,
-                "hp_lost": econ["hp_lost"],
+                "hp": self.player_hp,
+                "hp_lost": hp_lost,
                 "eliminated": eliminated,
                 "battle_result": battle_result,
                 "total_ticks": total_ticks,
@@ -3172,9 +3190,15 @@ class GameUI:
                 "top_damage": top_damage,
                 "top_kills": top_kills,
                 "top_heal": top_heal,
+                "bot_hp": self.bot_hp,
+                "player_hp": self.player_hp,
             }
             history.append(state)
             all_sims[round_num] = sim
+            
+            # Проверяем конец игры по HP
+            if self.player_hp <= 0 or self.bot_hp <= 0:
+                break
             
             # ── Battle animation phase (auto-start, no wait screen) ────────────
             try:
@@ -3218,23 +3242,34 @@ class GameUI:
         self.screen.fill(BG_COLOR)
 
         player_wins = sum(1 for s in history if s["battle_result"]["winner"] == "player")
-        if eliminated:
+        if self.player_hp <= 0:
             winner = "enemy"
-            verdict = "ВЫЛЕТЕЛИ"
+            verdict = "ПОРАЖЕНИЕ"
+            place = 2  # один бот живой + 1 = 2 место
+        elif self.bot_hp <= 0:
+            winner = "player"
+            verdict = "ПОБЕДА"
+            place = 1
         else:
             winner = "player" if player_wins > len(history) - player_wins else "enemy"
             verdict = "ПОБЕДА" if winner == "player" else "ПОРАЖЕНИЕ"
+            place = 1 if winner == "player" else 2
 
         self.draw_result(verdict, "?")
         self.play_sound("win" if winner == "player" else "lose")
-        if eliminated:
-            self.add_shake(10.0)      # вылет бьёт по нервам
+        if self.player_hp <= 0:
+            self.add_shake(10.0)      # проигрыш бьёт по нервам
 
         summary_surf = self.font_small.render(
-            f"Раундов выиграно: {player_wins}/{len(history)}   |   HP: {hp}",
+            f"Раундов сыграно: {len(history)}   |   HP игрока: {self.player_hp}   |   HP бота: {self.bot_hp}",
             True, (200, 200, 200))
         r = summary_surf.get_rect(center=(self.width // 2, self.height // 2 + 50))
         self.screen.blit(summary_surf, r)
+
+        place_surf = self.font_small.render(
+            f"Занятое место: {place}", True, (200, 200, 200))
+        r = place_surf.get_rect(center=(self.width // 2, self.height // 2 + 80))
+        self.screen.blit(place_surf, r)
 
         # Итоговая статистика по всему матчу
         # Определяем имя команды игрока из первого состояния
@@ -3316,8 +3351,8 @@ class GameUI:
         bot1 = create_bot(preset=bot1_preset, seed=seed)
         bot2 = create_bot(preset=bot2_preset, seed=seed + 1000)
 
-        gold1 = 10
-        gold2 = 10
+        gold1 = 5
+        gold2 = 5
         hp1 = START_HP
         hp2 = START_HP
 
