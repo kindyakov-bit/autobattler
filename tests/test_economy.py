@@ -121,17 +121,17 @@ class TestCalculateInterest:
     def test_10_gold_one_percent(self):
         assert calculate_interest(10) == 1
 
-    def test_49_gold_four_percent(self):
-        assert calculate_interest(49) == 4
+    def test_49_gold_three_percent_max(self):
+        assert calculate_interest(49) == 3
 
-    def test_50_gold_five_percent_max(self):
-        assert calculate_interest(50) == 5
+    def test_50_gold_three_percent_max(self):
+        assert calculate_interest(50) == 3
 
-    def test_100_gold_still_five_percent_max(self):
-        assert calculate_interest(100) == 5
+    def test_100_gold_still_three_percent_max(self):
+        assert calculate_interest(100) == 3
 
-    def test_large_gold_still_capped_at_five(self):
-        assert calculate_interest(999) == 5
+    def test_large_gold_still_capped_at_three(self):
+        assert calculate_interest(999) == 3
 
 
 # ---------- round_economy ----------
@@ -140,47 +140,47 @@ class TestRoundEconomy:
     def test_creep_win_with_interest(self):
         """Победа над крипами + проценты."""
         result = round_economy(gold=40, creep_win=True)
-        assert result["income"] == 2       # CREEP_WIN_GOLD
-        assert result["interest"] == 4     # 40 // 10 = 4
-        assert result["total_earned"] == 6
-        assert result["gold_after"] == 46
+        assert result["income"] == 7       # BASE_INCOME 5 + CREEP_WIN_GOLD 2
+        assert result["interest"] == 3     # 40 // 10 = 4, capped at MAX_INTEREST=3
+        assert result["total_earned"] == 10
+        assert result["gold_after"] == 50
 
     def test_pvp_win_with_interest(self):
         """Победа в PvP."""
         result = round_economy(gold=50, pvp_win=True)
-        assert result["income"] == 1       # WIN_GOLD
-        assert result["interest"] == 5     # max
-        assert result["total_earned"] == 6
+        assert result["income"] == 6       # BASE_INCOME 5 + WIN_BONUS 1
+        assert result["interest"] == 3     # max 3
+        assert result["total_earned"] == 9
 
     def test_loss_with_interest(self):
         """Поражение + проценты."""
         result = round_economy(gold=30)
-        assert result["income"] == 1       # WIN_GOLD (утешительное за поражение тоже)
+        assert result["income"] == 5       # BASE_INCOME only
         assert result["interest"] == 3     # 30 // 10 = 3
-        assert result["total_earned"] == 4
+        assert result["total_earned"] == 8
 
     def test_zero_gold_loss(self):
-        """Ноль золота — только утешительное."""
+        """Ноль золота — только базовый доход."""
         result = round_economy(gold=0)
-        assert result["income"] == 1
+        assert result["income"] == 5
         assert result["interest"] == 0
-        assert result["gold_after"] == 1
+        assert result["gold_after"] == 5
 
     def test_max_interest(self):
-        """Максимальный процент при 50+ золота."""
+        """Максимальный процент при 30+ золота."""
         result = round_economy(gold=60, pvp_win=True)
-        assert result["interest"] == 5
-        assert result["total_earned"] == 6
+        assert result["interest"] == 3
+        assert result["total_earned"] == 9
 
 
 # ---------- base_income ----------
 
 class TestBaseIncome:
     def test_creep_win(self):
-        assert base_income(creep_win=True) == 2
+        assert base_income(creep_win=True) == 7
 
     def test_pvp_win_only(self):
-        assert base_income(pvp_win=True) == 1
+        assert base_income(pvp_win=True) == 6
 
     def test_loss(self):
-        assert base_income() == 1
+        assert base_income() == 5

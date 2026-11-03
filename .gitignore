@@ -12,11 +12,6 @@ venv/
 ENV/
 env/
 
-# Environment files
-.env
-.env.local
-.env.*.local
-
 # IDE
 .vscode/
 .idea/
@@ -38,19 +33,19 @@ dist/
 .coverage
 htmlcov/
 
+# Node.js
+node_modules/
+
+# OpenCode
+.opencode/
+
 # Debug logs
 debug_log.txt
 debug_output.txt
 
-# Scratch / temporary
+# Scratch
 _scratch/
 _race/
 
-# OpenCode internals
-.opencode/
-
-# Third-party binaries (MCP servers etc.)
+# Tools
 tools/
-
-# Node modules
-node_modules/

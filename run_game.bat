@@ -16,6 +16,15 @@ if not exist "ui\game_ui.py" (
     exit /b 1
 )
 
+echo ========================================
+echo   Clearing Python cache (__pycache__, .pyc)
+echo ========================================
+for /d /r %%d in (__pycache__) do rmdir /s /q "%%d" 2>nul
+del /s /q *.pyc 2>nul
+del /s /q *.pyo 2>nul
+echo Cache cleared.
+echo.
+
 echo Starting game...
 python run_ui.py
 

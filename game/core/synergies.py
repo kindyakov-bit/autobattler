@@ -192,6 +192,7 @@ def apply_synergy_bonuses(team_units: list[dict], synergy_bonuses: dict) -> list
         u.setdefault("_base_hp", u.get("hp", 100))
         u.setdefault("_base_damage", u.get("damage", 50))
         u.setdefault("_base_attack_speed", u.get("attack_speed", 1.0))
+        u.setdefault("_base_crit_chance", u.get("crit_chance", 0))
 
         if "hp_bonus_pct" in bonuses:
             u["hp"] = int(u["_base_hp"] * (1 + bonuses["hp_bonus_pct"] / 100))
@@ -200,6 +201,8 @@ def apply_synergy_bonuses(team_units: list[dict], synergy_bonuses: dict) -> list
         if "attack_speed_pct" in bonuses:
             u["attack_speed"] = u["_base_attack_speed"] * (
                 1 + bonuses["attack_speed_pct"] / 100)
+        if "crit_chance_bonus" in bonuses:
+            u["crit_chance"] = u["_base_crit_chance"] + bonuses["crit_chance_bonus"]
 
         modified.append(u)
 

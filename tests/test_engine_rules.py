@@ -83,7 +83,9 @@ class TestRangeTargeting:
         """Удар заднего ближнего юнита задерживается сближением."""
         sim = BattleSimulator(seed=11)
         sim.add_team("player", [simple(f"p{i}", 5000, 40, 1.0, 1) for i in range(6)])
-        sim.add_team("enemy", [simple(f"e{j}", 5000, 40, 1.0, 1) for j in range(6)])
+        # 5 врагов — достаточно, чтобы беклайн (p[5] на строке 1) не был
+        # adjacent ни к одному врагу и должен был сближаться перед атакой.
+        sim.add_team("enemy", [simple(f"e{j}", 5000, 40, 1.0, 1) for j in range(5)])
         sim.run(max_ticks=600)
         first_hit = {}
         for ev in sim.log:

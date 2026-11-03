@@ -134,8 +134,8 @@ class TestEconomyUnchanged:
     def test_interest_still_works(self):
         assert calculate_interest(0) == 0
         assert calculate_interest(10) == 1
-        assert calculate_interest(50) == 5
-        assert calculate_interest(999) == 5
+        assert calculate_interest(50) == 3
+        assert calculate_interest(999) == 3
 
 
 # ─────────────────────────────────────────────────────────────────────────

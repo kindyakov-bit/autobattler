@@ -11,9 +11,13 @@ class DraftPhase:
         self.unit_data = unit_data  # {name: {...}} из JSON
         self.rng = random.Random()
 
-    def get_shop_items(self, count: int = 10) -> list[dict]:
-        """Получить список юнитов в магазине (ролл)."""
-        return self.shop.roll(count=count)
+    def get_shop_items(self, count: int = 10, player: object = None) -> list[dict]:
+        """Получить список юнитов в магазине (ролл).
+
+        Количество карточек определяется shop.shop_slots (уровень магазина).
+        Если передан player, юниты с ★3 исключаются из розыгрыша.
+        """
+        return self.shop.roll(count=count, player=player)
 
     def buy_unit(self, player, name: str) -> str:
         """Купить юнита из магазина. Возвращает имя после merge."""
@@ -39,7 +43,7 @@ class DraftPhase:
 
     def get_board_units(self, player) -> list[dict]:
         """Получить список юнитов на доске для боя."""
-        return player.get_team_stats()
+        return player.get_team_stats(self.unit_data)
 
     def get_bench_info(self, player) -> list[str]:
         """Информация о резерве."""

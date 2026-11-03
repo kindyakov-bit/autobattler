@@ -14,7 +14,7 @@ if str(_project_root) not in sys.path:
 import json
 import pytest
 
-from ui.game_ui import BENCH_W
+from ui.game_ui import BENCH_CELL_SIZE as BENCH_W
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -197,6 +197,9 @@ class TestReadability:
         """
         class P:
             gold = 10
+            level = 1
+            xp = 0
+            xp_to_next_level = 2
             reserve = ["warrior_freshman", "archer_marksman★2"]
             board = [{"name": "warrior_freshman", "star": 1},
                      {"name": "archer_marksman", "star": 2},
@@ -204,6 +207,9 @@ class TestReadability:
             items = []
             def get_synergy_count(self, c):
                 return 1
+
+            def get_race_count(self, r, all_units=None):
+                return 0
 
         ui.selected_shop_idx = 0      # ключевая деталь: слот шопа выбран
         ui.selected_bench_idx = None
@@ -217,11 +223,17 @@ class TestReadability:
         """И с выбранным слотом бенча тоже."""
         class P:
             gold = 10
+            level = 1
+            xp = 0
+            xp_to_next_level = 2
             reserve = ["warrior_freshman"]
             board = [{"name": "warrior_freshman", "star": 1}]
             items = []
             def get_synergy_count(self, c):
                 return 1
+
+            def get_race_count(self, r, all_units=None):
+                return 0
 
         ui.selected_shop_idx = None
         ui.selected_bench_idx = 0

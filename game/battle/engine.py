@@ -27,6 +27,8 @@ SUPPORTED_ABILITY_TYPES = (
     "buff_allies",
     "buff_next_attack",
     "aura",
+    "heal",
+    "assassin_teleport",
 )
 
 # Виды временных эффектов на юните
@@ -35,6 +37,7 @@ KIND_SPEED_PCT = "speed_pct"
 KIND_DAMAGE_REDUCTION = "damage_reduction"
 KIND_SLOW_PCT = "slow_pct"
 KIND_NEXT_ATTACK = "next_attack_bonus"
+KIND_CRIT_CHANCE = "crit_chance"
 
 # Лимиты радиуса урона по области
 MAX_AOE_TARGETS = {1: 1, 2: 3}
@@ -107,6 +110,11 @@ class Unit:
         # Реально применённый урон (после снижения) — для честных цифр в UI
         self.last_damage = 0.0
 
+        # Ассасин: ожидание перед телепортом, флаг телепорта, цель —最弱 враг
+        self.assassin_wait = 0          # тиков ожидания перед телепортом
+        self.assassin_teleported = False  # уже телепортировался
+        self.assassin_target_weakest = False  # бить самого слабого, а не ближнего
+
         # Таймер до следующей атаки (в тиках)
         self.attack_timer = self._ticks_per_attack()
 
@@ -121,9 +129,10 @@ class Unit:
         return max(1, math.ceil(60 / max(0.05, self.attack_speed)))
 
     def _refresh_stats(self) -> None:
-        """Пересчитать damage/attack_speed из базы + активных эффектов."""
+        """Пересчитать damage/attack_speed/crit_chance из базы + активных эффектов."""
         damage = self.base_damage
         speed = self.base_attack_speed
+        crit_chance = self.base_crit_chance
         for st in self.statuses:
             kind = st["kind"]
             if kind == KIND_DAMAGE_BONUS:
@@ -132,8 +141,11 @@ class Unit:
                 speed *= (1 + st.get("pct", 0) / 100)
             elif kind == KIND_SLOW_PCT:
                 speed *= (1 - st.get("pct", 0) / 100)
+            elif kind == KIND_CRIT_CHANCE:
+                crit_chance += st.get("amount", 0)
         self.damage = damage
         self.attack_speed = max(0.05, speed)
+        self.crit_chance = crit_chance
 
     # ── Временные эффекты ──────────────────────────────────────────────────
 
@@ -186,6 +198,11 @@ class Unit:
         self.closing = 0
         self.attack_timer = self._ticks_per_attack()
         self.ability_cooldown = (self.active_ability or {}).get("cooldown", 0)
+        # Ассасин: сбрасываем ожидание и телепорт, цель на самого слабого сохраняем
+        eff = (self.active_ability or {}).get("effect", {})
+        self.assassin_wait = eff.get("wait_ticks", 0)
+        self.assassin_teleported = False
+        self.assassin_target_weakest = eff.get("target_weakest", False)
         self._refresh_stats()
 
     # ── Урон ───────────────────────────────────────────────────────────────
@@ -249,11 +266,15 @@ class Unit:
             "ability_cooldown": self.ability_cooldown,
             "base_damage": self.base_damage,
             "base_attack_speed": self.base_attack_speed,
+            "base_crit_chance": self.base_crit_chance,
             "unit_class": self.unit_class,
             "statuses": [dict(s) for s in self.statuses],
             "row": self.row,
             "col": self.col,
             "closing": 0,
+            "assassin_wait": self.assassin_wait,
+            "assassin_teleported": self.assassin_teleported,
+            "assassin_target_weakest": self.assassin_target_weakest,
         }
 
 
@@ -451,6 +472,22 @@ class BattleSimulator:
                 return True
         return False
 
+    def _cell_occupied_by_enemy(self, unit: Unit, row: int, col: int) -> bool:
+        """Проверка, занята ли клетка живым врагом."""
+        if not (0 <= row < BATTLE_ROWS and 0 <= col < TOTAL_COLS):
+            return False
+        for team_name, team_units in self.teams.items():
+            if team_name == unit.team:
+                continue
+            for eu in team_units:
+                if eu is not unit and eu.alive and eu.row == row and eu.col == col:
+                    return True
+        return False
+
+    def _cell_occupied(self, unit: Unit, row: int, col: int) -> bool:
+        """Проверка, занята ли клетка любым живым юнитом (союзником или врагом)."""
+        return self._cell_occupied_by_ally(unit, row, col) or self._cell_occupied_by_enemy(unit, row, col)
+
     def _move_towards(self, unit: Unit, target_row: int, target_col: int) -> None:
         """Сдвинуть юнита на одну клетку ближе к целевой позиции."""
         # Сначала по колонке (к врагу), потом по строке
@@ -497,7 +534,7 @@ class BattleSimulator:
 
         # Если всё ещё не нашли — любое свободное соседнее место
         if not any(
-            not self._cell_occupied_by_ally(unit, max(0, min(BATTLE_ROWS - 1, nr)), max(0, min(TOTAL_COLS - 1, nc)))
+            not self._cell_occupied(unit, max(0, min(BATTLE_ROWS - 1, nr)), max(0, min(TOTAL_COLS - 1, nc)))
             for nr, nc in candidates
             if (nr, nc) != (unit.row, unit.col)
         ):
@@ -512,7 +549,7 @@ class BattleSimulator:
             nc = max(0, min(TOTAL_COLS - 1, nc))
             if (nr, nc) == (unit.row, unit.col):
                 continue
-            if not self._cell_occupied_by_ally(unit, nr, nc):
+            if not self._cell_occupied(unit, nr, nc):
                 unit.row, unit.col = nr, nc
                 return
 
@@ -556,6 +593,44 @@ class BattleSimulator:
                 unit.row, unit.col = nr, nc
                 return
 
+    def _teleport_assassin(self, unit: Unit) -> None:
+        """Телепортирует убийцу в задние ряды противника.
+
+        Враг находится с противоположной стороны поля. Задний ряд врага —
+        крайняя колонка его стороны (справа для левой команды, слева для правой).
+        Пытаемся встать в тот же ряд, что и самый слабый живой враг.
+        """
+        c0, c1 = self._team_col_range(unit.team)
+        # Определяем заднюю колонку врага (противоположная сторона)
+        if c0 == 0:
+            # Наша команда слева (колонки 0-4), враг справа (5-9), задний ряд = 9
+            back_col = TOTAL_COLS - 1
+        else:
+            # Наша команда справа (колонки 5-9), враг слева (0-4), задний ряд = 0
+            back_col = 0
+
+        # Пытаемся встать в ряд самого слабого живого врага
+        target_row = unit.row if unit.row is not None else BATTLE_ROWS // 2
+        enemies = self._alive_enemies(unit)
+        if enemies:
+            weakest = min(enemies, key=lambda e: e.hp)
+            target_row = weakest.row
+
+        # Ищем свободную клетку в заднем ряду врага (сначала предпочитаемый ряд)
+        rows_to_try = [target_row] + [r for r in range(BATTLE_ROWS) if r != target_row]
+        for r in rows_to_try:
+            if not self._cell_occupied_by_ally(unit, r, back_col):
+                unit.row, unit.col = r, back_col
+                unit.start_row, unit.start_col = r, back_col
+                return
+        # Если все клетки заднего ряда заняты союзниками (маловероятно), ищем любую свободную
+        for r in range(BATTLE_ROWS):
+            for c in range(c0, c1 + 1):
+                if not self._cell_occupied_by_ally(unit, r, c):
+                    unit.row, unit.col = r, c
+                    unit.start_row, unit.start_col = r, c
+                    return
+
     def _has_target_in_range(self, unit: Unit) -> bool:
         """Есть ли живой враг, до которого юнит сейчас достаёт (дистанция <= range_)."""
         enemies = self._alive_enemies(unit)
@@ -589,7 +664,10 @@ class BattleSimulator:
         return in_radius[:cap]
 
     def _find_targets(self, event: dict) -> list[Unit]:
-        """Найти цели для атаки: ближайший живой враг в радиусе range_."""
+        """Найти цели для атаки: ближайший живой враг в радиусе range_.
+
+        Ассасины выбирают самого слабого живого врага в радиусе, а не ближнего.
+        """
         attacker = self._find_unit(event["attacker_id"])
         if not attacker or not attacker.alive:
             return []
@@ -601,6 +679,16 @@ class BattleSimulator:
         radius = event.get("aoe_radius", 0)
         if radius and radius > 0:
             return self._enemies_in_radius(attacker, radius)
+
+        # Ассасин: бить самого слабого живого врага в радиусе атаки
+        if getattr(attacker, "assassin_target_weakest", False):
+            in_range = [
+                e for e in enemies
+                if attacker.range_ >= self.distance(attacker, e)
+            ]
+            if in_range:
+                return [min(in_range, key=lambda e: e.hp)]
+            return []  # нет цели в радиусе
 
         nearest = min(enemies, key=lambda e: self.distance(attacker, e))
         if attacker.range_ < self.distance(attacker, nearest):
@@ -716,6 +804,20 @@ class BattleSimulator:
                         eff.get("duration", 20),
                         pct=eff.get("damage_reduction_pct", 30),
                     )
+                # attack_speed_pct — бафф скорости атаки союзникам (Баффер)
+                if eff.get("attack_speed_pct"):
+                    ally.add_status(
+                        KIND_SPEED_PCT,
+                        eff.get("duration", 20),
+                        pct=eff.get("attack_speed_pct", 0),
+                    )
+                # crit_chance_bonus — бафф шанса крита союзникам (Баффер демонов)
+                if eff.get("crit_chance_bonus"):
+                    ally.add_status(
+                        KIND_CRIT_CHANCE,
+                        eff.get("duration", 20),
+                        amount=eff.get("crit_chance_bonus", 0),
+                    )
             targets = [a.unit_id for a in self.teams[unit.team] if a.alive]
             events.append(self._record_ability(unit, targets))
 
@@ -750,6 +852,24 @@ class BattleSimulator:
                     amount=amount,
                 )
             events.append(self._record_ability(unit, [unit.unit_id]))
+
+        elif atype == "heal":
+            heal_amount = eff.get("heal", 0)
+            events += self._apply_heal(unit, heal_amount)
+            targets = [unit.unit_id]
+            events.append(self._record_ability(unit, targets))
+
+        elif atype == "assassin_teleport":
+            # Инициализация ассасина: установить время ожидания и флаг цели на слабого
+            eff = ability.get("effect", {})
+            if unit.assassin_teleported:
+                # Уже телепортировался — больше не перекастовываем способность
+                return []
+            unit.assassin_wait = eff.get("wait_ticks", 60)
+            unit.assassin_target_weakest = eff.get("target_weakest", True)
+            unit.ability_cooldown = -1  # Никогда больше не перекастовывается
+            targets = [unit.unit_id]
+            events.append(self._record_ability(unit, targets))
 
         return events
 
@@ -844,6 +964,56 @@ class BattleSimulator:
 
         return events
 
+    def _apply_heal(self, caster: Unit, heal_amount: float) -> list[dict]:
+        """Лечить союзника с наименьшим процентом HP (целитель)."""
+        events = []
+        if not caster.alive or heal_amount <= 0:
+            return events
+
+        allies = [u for u in self.teams.get(caster.team, []) if u.alive]
+        if not allies:
+            return events
+
+        # Цель — союзник с наименьшим % HP (ниже всего шкала здоровья)
+        target = min(allies, key=lambda u: u.hp / max(u.max_hp, 1))
+
+        if target.hp >= target.max_hp:
+            return events  # все уже с полным HP
+
+        old_hp = target.hp
+        target.hp = min(target.max_hp, target.hp + heal_amount)
+        actual_heal = target.hp - old_hp
+        if actual_heal <= 0:
+            return events
+
+        ability = caster.active_ability or {}
+        ability_name = ability.get("name", "Целение")
+
+        event = {
+            "type": "ability_heal",
+            "tick": self.tick_count,
+            "caster_id": caster.unit_id,
+            "caster_team": caster.team,
+            "target_id": target.unit_id,
+            "heal": round(actual_heal, 1),
+            "target_hp": target.hp,
+            "ability_name": ability_name,
+            "ability_type": "heal",
+        }
+        events.append(event)
+
+        self._ability_events.append({
+            "tick": self.tick_count,
+            "caster_id": caster.unit_id,
+            "caster_team": caster.team,
+            "ability_name": ability_name,
+            "ability_type": "heal",
+            "heal": heal_amount,
+            "targets": [target.unit_id],
+        })
+
+        return events
+
     # ── Результат ──────────────────────────────────────────────────────────
 
     def _check_result(self) -> dict | None:
@@ -909,6 +1079,21 @@ class BattleSimulator:
                 if unit.active_ability and unit.ability_cooldown > 0:
                     unit.ability_cooldown -= 1
 
+                # 2.5. Ассасин: ожидание перед телепортом в задние ряды противника
+                if getattr(unit, "assassin_wait", 0) > 0:
+                    unit.assassin_wait -= 1
+                    if unit.assassin_wait == 0:
+                        self._teleport_assassin(unit)
+                        unit.assassin_teleported = True
+                        # Записываем ивент способности (UI покажет эффект телепорта)
+                        self.log.append(self._record_ability(unit, [unit.unit_id]))
+                    continue  # пропускаем движение, атаку и способность этого тика
+
+                # 3. Проверяем, есть ли цель в радиусе ДО движения — иначе
+                # юнит из заднего ряда «тратит» перезарядкуattack, пока идёт
+                # к врагу, и бьёт одновременно с передовой, что ломает баланс.
+                can_attack = self._has_target_in_range(unit)
+
                 # 3. Движение к цели / удержание дистанции
                 enemies = self._alive_enemies(unit)
                 if enemies:
@@ -925,17 +1110,22 @@ class BattleSimulator:
                         elif dist > unit.range_:
                             self._move_towards(unit, nearest.row, nearest.col)
 
-                # 4. Атака (по таймеру)
-                unit.attack_timer -= 1
-                if unit.attack_timer <= 0:
-                    for event in unit.tick(self.rng):
-                        self.log.extend(self._apply_attack(event))
-                    unit.attack_timer = unit._ticks_per_attack()
+                # 4. Атака (по таймеру) — только если есть цель в радиусе
+                if can_attack:
+                    unit.attack_timer -= 1
+                    if unit.attack_timer <= 0:
+                        for event in unit.tick(self.rng):
+                            self.log.extend(self._apply_attack(event))
+                        unit.attack_timer = unit._ticks_per_attack()
 
                 # 5. Способность (когда готова)
                 if unit.alive and unit.active_ability and unit.ability_cooldown == 0:
-                    self.log.extend(self._cast_ability(unit))
-                    unit.ability_cooldown = unit.active_ability.get("cooldown", 3)
+                    # Ассасин с телепортом срабатывает один раз — не перекастовываем
+                    if unit.active_ability.get("type") == "assassin_teleport" and unit.assassin_teleported:
+                        pass
+                    else:
+                        self.log.extend(self._cast_ability(unit))
+                        unit.ability_cooldown = unit.active_ability.get("cooldown", 3)
 
             # Собрать киллы за этот тик из лога (только новые события)
             for evt in self.log:
@@ -1017,10 +1207,14 @@ class BattleSimulator:
                 u.base_damage = data.get("base_damage", u.base_damage)
                 u.base_attack_speed = data.get("base_attack_speed", u.base_attack_speed)
                 u.unit_class = data.get("unit_class", u.unit_class)
+                u.base_crit_chance = data.get("base_crit_chance", u.base_crit_chance)
                 u.statuses = [dict(s) for s in data.get("statuses", [])]
                 u.row = data.get("row", u.row)
                 u.col = data.get("col", u.col)
                 u.closing = data.get("closing", 0)
+                u.assassin_wait = data.get("assassin_wait", 0)
+                u.assassin_teleported = data.get("assassin_teleported", False)
+                u.assassin_target_weakest = data.get("assassin_target_weakest", False)
                 u._refresh_stats()
 
     def get_total_ticks(self) -> int:
