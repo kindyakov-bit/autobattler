@@ -59,7 +59,7 @@ class TestPoolExhausted:
     def test_pool_exhausted(self):
         pool = Pool({"warrior": 1})         # ровно 29 копий
         player = Player(gold=100)           # золота хватит на всё
-        player.max_board = 100              # доска не ограничивает, резерв — да (max_bench=9)
+        player.max_board = 100              # достаточно для теста, чтобы перекладывать на доску
         shop = Shop(pool)
 
         # Каждые 3 покупки сливаются в ★2 и возвращают 2 копии в пул.
@@ -68,6 +68,9 @@ class TestPoolExhausted:
         # Итого: 83 покупки исчерпывают все копии.
         for _ in range(83):
             shop.buy(player, "warrior", cost=1)
+            # Перекладываем на доску, чтобы резерв не переполнился (max_bench=20)
+            if player.reserve and len(player.board) < player.max_board:
+                shop.place(player, 0)
 
         assert pool.available("warrior") == 0
 

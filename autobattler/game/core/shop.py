@@ -158,24 +158,33 @@ class Shop:
         return unit["name"]
 
     def _count_copies(self, player, target_name: str) -> int:
-        """Считает копии target_name в резерве (скамейке).
-
-        Слияние берёт копии только из резерва — юниты на доске не трогаем.
-        """
-        return sum(1 for r in player.reserve if r == target_name)
+        """Считает копии target_name в резерве и на доске вместе."""
+        count = sum(1 for r in player.reserve if r == target_name)
+        count += sum(1 for u in player.board if u["name"] == target_name)
+        return count
 
     def _remove_copies(self, player, target_name: str, count: int) -> int:
-        """Удаляет count копий target_name из резерва.
+        """Удаляет count копий target_name из резерва и доски.
 
-        Слияние берёт копии только из резерва (скамейки), а не с доски,
-        иначе юниты с поля могут бесчестно исчезать при автослиянии.
-        Возвращает сколько реально удалено.
+        Приоритет: сначала резерв (скамейка), потом доска. Освобождает
+        слоты на доске. Возвращает сколько реально удалено.
         """
         removed = 0
+        # Сначала из резерва
         for r in list(player.reserve):
             if r == target_name and removed < count:
                 player.reserve.remove(r)
                 removed += 1
+        # Потом с доски (освобождаем слоты)
+        if removed < count:
+            for u in list(player.board):
+                if u["name"] == target_name and removed < count:
+                    # Возвращаем предметы с юнита в инвентарь перед удалением,
+                    # иначе вещи исчезнут при слиянии
+                    for item in u.get("items", []):
+                        player.items.append(dict(item))
+                    player.board.remove(u)
+                    removed += 1
         return removed
 
     def _maybe_merge(self, player, name: str) -> str:
