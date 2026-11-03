@@ -96,12 +96,12 @@ class Game:
     def _base_damage_for_round(round_num: int) -> int:
         """Базовый урон за проигрыш в PvP-раунде, растёт с номером раунда."""
         if round_num <= 10:
-            return 5
+            return 6
         if round_num <= 20:
-            return 10
+            return 12
         if round_num <= 30:
-            return 15
-        return 20
+            return 18
+        return 24
 
     def _is_game_over(self) -> bool:
         """Проверить, завершена ли игра по HP."""
