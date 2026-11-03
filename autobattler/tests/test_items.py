@@ -223,14 +223,17 @@ class TestSellReturnsItems:
         assert len(player.board[0].get("items", [])) == 1
         assert len(player.items) == 0
 
-        # Ещё 6 покупок warrior_freshman → два новых ★2 в резерве.
-        # Итого ★2 = 3 (2 в резерве + 1 на доске с предметом) → слияние в ★3.
+        # Ещё 6 покупок warrior_freshman → 6 новых ★1 в резерве.
+        # Итого ★1 = 6 в резерве → два слияния 3★1→★2, затем 2★2→★3.
+        # ★2 с доски (с предметом) НЕ трогается при слиянии — слияние берёт
+        # копии только из резерва.
         for _ in range(6):
             shop.buy(player, "warrior_freshman", cost=1)
 
         assert any("★3" in r for r in player.reserve), player.reserve
+        # ★2 с доски остаётся на месте (слияние не забирает юниты с поля)
         board_names = [u["name"] for u in player.board]
-        assert "warrior_freshman★2" not in board_names, board_names
-        # Предмет с удалённого при слиянии юнита вернулся в инвентарь
-        assert len(player.items) == 1, player.items
-        assert player.items[0]["name"] == "Power Blade"
+        assert "warrior_freshman★2" in board_names, board_names
+        # Предмет с доски остаётся на юните (не возвращается в инвентарь)
+        assert len(player.board[0].get("items", [])) == 1
+        assert len(player.items) == 0, player.items

@@ -2252,7 +2252,7 @@ class GameUI:
                 # Храним предметы с юнита, иначе они исчезнут при переходе в следующий раунд
                 "items": [dict(it) for it in u.get("items", [])],
             }
-            for u in player.board[:6]
+            for u in player.board
         ]
         return player_units, player.gold, player.items, list(player.reserve), board_format, player.level, player.xp
 

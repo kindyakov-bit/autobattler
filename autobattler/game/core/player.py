@@ -31,7 +31,7 @@ class Player:
         self.reserve: list[str] = []       # bench — купленные юниты
         self.board: list[dict] = []         # на доске — {'name': str, 'star': int, ...}
         self.items: list[dict] = []         # инвентарь предметов
-        self.max_bench = 9                  # макс. размер банка (соответствует BENCH_MAX в ui/game_ui.py)
+        self.max_bench = 20                 # макс. размер банка (соответствует BENCH_MAX в ui/game_ui.py)
         self.level = 1                      # уровень игрока (1..9)
         self.xp = 0                         # текущий опыт
         self.xp_to_next_level = self.XP_TABLE[1]  # опыта нужно до следующего уровня
