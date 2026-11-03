@@ -1690,8 +1690,7 @@ class GameUI:
             # Восстанавливаем скамейку (юниты без позиции на поле) между раундами.
             saved_reserve = existing_units.get("reserve", [])
             for name in saved_reserve:
-                if name not in player.reserve:
-                    player.reserve.append(name)
+                player.reserve.append(name)
 
             # Восстанавливаем предметы между раундами (иначе пропадают после каждого боя)
             saved_items = existing_units.get("items", [])
