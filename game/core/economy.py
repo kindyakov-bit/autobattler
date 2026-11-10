@@ -91,6 +91,31 @@ def round_hp_damage(is_creep: bool, player_won: bool,
             + PVP_LOSS_DAMAGE_PER_UNIT * max(0, surviving_enemy_units))
 
 
+def pvp_base_damage(round_num: int) -> int:
+    """Базовый урон за проигранный PvP-раунд, растёт с номером раунда.
+
+    Единая формула для ядра (round.py) и UI. Значения соответствуют
+    живому балансу UI (5/10/15/20); раньше round.py использовал 6/12/18/24.
+    """
+    if round_num <= 10:
+        return 5
+    if round_num <= 20:
+        return 10
+    if round_num <= 30:
+        return 15
+    return 20
+
+
+def pvp_round_damage(round_num: int, winner_survivors: int) -> int:
+    """Урон проигравшему в PvP: база + за каждого выжившего у ПОБЕДИТЕЛЯ.
+
+    winner_survivors — сколько юнитов выжило у выигравшей стороны.
+    Раньше в round.py/UI бралась выжившая сторона ПРОИГРАВШЕГО (всегда 0
+    при аннигиляции), поэтому бонус за выживших не работал.
+    """
+    return pvp_base_damage(round_num) + PVP_LOSS_DAMAGE_PER_UNIT * max(0, winner_survivors)
+
+
 def round_economy(gold: int, pvp_win: bool = False, creep_win: bool = False,
                   hp: int = None, is_creep: bool = False,
                   surviving_enemy_units: int = 0,

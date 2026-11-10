@@ -2,6 +2,24 @@
 
 import random
 
+from game.core.unit_name import base_name, star_level
+
+# Сколько копий пула реально потребляет юнит каждой звезды (с учётом refund при слиянии).
+# ★1 = 1 копия; ★2 = 3 покупки − 2 refund = 1; ★3 = 3×★2 = 3 копии.
+POOL_COST_BY_STAR = {1: 1, 2: 1, 3: 3}
+
+
+def accumulate_item_bonuses(unit: dict, stats: dict) -> None:
+    """Накопить бонусы предмета в unit['item_bonuses'].
+
+    Единая точка для Shop.apply_item_to_unit и восстановления юнитов в UI.
+    speed_bonus_pct тоже хранится здесь — иначе предмет на скорость
+    не применялся бы в build_combat_team.
+    """
+    bonuses = unit.setdefault("item_bonuses", {})
+    for stat_name, stat_value in stats.items():
+        bonuses[stat_name] = bonuses.get(stat_name, 0) + stat_value
+
 
 #: Стоимость переброски витрины магазина (реролл).
 ROLL_COST = 2
@@ -88,11 +106,16 @@ class Shop:
             raise ShopError(f"нужно {cost} золота, есть {player.gold}")
         if self.pool.available(name) == 0:
             raise ShopError(f"{name}: копий в пуле не осталось")
+        base = base_name(name)
         if len(player.reserve) >= player.max_bench:
-            raise ShopError(f"резерв полон ({player.max_bench}), разместите или продайте юнита")
+            # Резерв полон — покупка разрешена только если покупаемая копия
+            # завершает тройку той же звезды: 2 точные копии (резерв+доска)
+            # + 1 покупаемая = 3 -> слияние освободит место.
+            if self._count_copies(player, name) < 2:
+                raise ShopError(f"резерв полон ({player.max_bench}), разместите или продайте юнита")
         player.gold -= cost
         self.pool.take(name)
-        player.buy(name)
+        player.reserve.append(name)
         return self._maybe_merge(player, name)
 
     def sell(self, player, idx: int, from_board: bool = False) -> str:
@@ -106,18 +129,19 @@ class Shop:
             if idx < 0 or idx >= len(player.board):
                 raise ShopError(f"Индекс {idx} вне диапазона (board={len(player.board)})")
             unit = player.board.pop(idx)
-            base_name = unit["name"].split("★")[0]
+            base = base_name(unit["name"])
             # Возвращаем предметы с проданного юнита в инвентарь игрока
             for item in unit.get("items", []):
                 player.items.append(dict(item))
-            self.pool.refund(base_name, copies=1)
-            return base_name
+            star = unit.get("star", star_level(unit["name"]))
+            self.pool.refund(base, copies=POOL_COST_BY_STAR.get(star, 1))
+            return base
         if idx < 0 or idx >= len(player.reserve):
             raise ShopError(f"Индекс {idx} вне диапазона (reserve={len(player.reserve)})")
         name = player.reserve.pop(idx)
-        base_name = name.split("★")[0]
-        self.pool.refund(base_name, copies=1)
-        return base_name
+        base = base_name(name)
+        self.pool.refund(base, copies=POOL_COST_BY_STAR.get(star_level(name), 1))
+        return base
 
     def place(self, player, idx: int) -> dict:
         """Положить юнита из резерва на доску по индексу."""
@@ -126,11 +150,7 @@ class Shop:
         if len(player.board) >= player.max_board:
             raise ShopError(f"Доска полна ({len(player.board)}/{player.max_board})")
         name = player.reserve.pop(idx)
-        star = 1
-        if "★" in name:
-            star_str = name.split("★")[1]
-            star = int(star_str) if star_str.isdigit() else 1
-        unit = {"name": name, "star": star}
+        unit = {"name": name, "star": star_level(name)}
         player.board.append(unit)
         return unit
 
@@ -147,6 +167,8 @@ class Shop:
         """Убрать юнита с доски обратно в резерв. Возвращает имя."""
         if idx < 0 or idx >= len(player.board):
             raise ShopError(f"Индекс {idx} вне диапазона (board={len(player.board)})")
+        if len(player.reserve) >= player.max_bench:
+            raise ShopError(f"резерв полон ({player.max_bench})")
         unit = player.board.pop(idx)
         # Возвращаем предметы с юнита в инвентарь игрока
         for item in unit.get("items", []):
@@ -172,13 +194,15 @@ class Shop:
             return True
         return any(u["name"] == star3_name for u in player.board)
 
-    def _remove_copies(self, player, target_name: str, count: int) -> int:
+    def _remove_copies(self, player, target_name: str, count: int) -> tuple[int, dict | None]:
         """Удаляет count копий target_name из резерва и доски.
 
         Приоритет: сначала резерв (скамейка), потом доска. Освобождает
-        слоты на доске. Возвращает сколько реально удалено.
+        слоты на доске. Возвращает (removed, board_slot) где board_slot —
+        {"row": ..., "col": ...} первой снятой с доски копии или None.
         """
         removed = 0
+        board_slot = None
         # Сначала из резерва
         for r in list(player.reserve):
             if r == target_name and removed < count:
@@ -192,9 +216,11 @@ class Shop:
                     # иначе вещи исчезнут при слиянии
                     for item in u.get("items", []):
                         player.items.append(dict(item))
+                    if board_slot is None:
+                        board_slot = {"row": u.get("row"), "col": u.get("col")}
                     player.board.remove(u)
                     removed += 1
-        return removed
+        return removed, board_slot
 
     def _maybe_merge(self, player, name: str) -> str:
         """Автоматически сливать 3 одинаковых в ★2, затем 3★2 в ★3.
@@ -211,18 +237,32 @@ class Shop:
 
         # 3 × ★1 → ★2
         while self._count_copies(player, base_name) >= 3:
-            self._remove_copies(player, base_name, 3)
+            removed, board_slot = self._remove_copies(player, base_name, 3)
             merged = base_name + "★2"
-            player.reserve.append(merged)
+            if len(player.reserve) < player.max_bench:
+                player.reserve.append(merged)
+            else:
+                unit = {"name": merged, "star": 2}
+                if board_slot:
+                    unit.update(board_slot)
+                player.board.append(unit)
             self.pool.refund(base_name, copies=2)
             returned_name = merged  # this call created a ★2
 
         # 3 × ★2 → ★3 (только этот путь; альтернативный 2★2→★3 удалён)
         while self._count_copies(player, base_name + "★2") >= 3:
-            self._remove_copies(player, base_name + "★2", 3)
+            removed, board_slot = self._remove_copies(player, base_name + "★2", 3)
             merged = base_name + "★3"
-            player.reserve.append(merged)
-            self.pool.refund(base_name + "★2", copies=2)
+            if len(player.reserve) < player.max_bench:
+                player.reserve.append(merged)
+            else:
+                unit = {"name": merged, "star": 3}
+                if board_slot:
+                    unit.update(board_slot)
+                player.board.append(unit)
+            # Пул НЕ возвращаем: каждый ★2 уже вернул 2 копии при своём создании,
+            # поэтому ★3 netto стоит 3 базовых копий. Раньше сюда возвращались
+            # "base★2" копии — несуществующий ключ, засорявший пул и магазин.
             returned_name = merged  # this call created a ★3
 
         return returned_name
@@ -259,14 +299,19 @@ class Shop:
                 if c == target_cost and self.pool.available(u) > 0
                 and not self._has_star3(player, u)
             ]
-            # Если нет юнитов этой стоимости, берём любую доступную
+            # Если нет юнитов этой стоимости, берём любой доступный юнит из пула
+            # (только реальные ключи unit_costs, без фантомных записей).
             if not candidates:
-                candidates = [u for u in self.pool.remaining if self.pool.available(u) > 0]
+                candidates = [
+                    u for u in self.unit_costs
+                    if self.pool.available(u) > 0 and not self._has_star3(player, u)
+                ]
             if not candidates:
                 break  # пул пуст
 
             unit_name = self.rng.choice(candidates)
-            shop_items.append({"name": unit_name, "cost": target_cost})
+            # Цена карточки — реальная цена юнита, а не выпавший target_cost.
+            shop_items.append({"name": unit_name, "cost": self.unit_costs.get(unit_name, target_cost)})
         return shop_items
 
     def get_available_units(self) -> list[str]:
@@ -311,44 +356,18 @@ class Shop:
         item = player.items[item_idx]
         unit = player.board[unit_idx]
         
-        # Применяем бонусы предмета к юниту
+        # Применяем бонусы предмета к юниту (все статы, включая speed_bonus_pct,
+        # копятся в item_bonuses — их применит build_combat_team при сборке боя).
         if "stats" in item:
-            if "item_bonuses" not in unit:
-                unit["item_bonuses"] = {}
-            if "items" not in unit:
-                unit["items"] = []
-            
-            for stat_name, stat_value in item["stats"].items():
-                if stat_name == "speed_bonus_pct":
-                    # Процентная прибавка — применяется к базовой скорости
-                    base_speed = unit.get("_base_attack_speed", 1.0)
-                    unit["attack_speed"] = base_speed * (1 + stat_value / 100)
-                else:
-                    # Фиксированная прибавка
-                    current_val = unit.get("item_bonuses", {}).get(stat_name, 0)
-                    unit["item_bonuses"][stat_name] = current_val + stat_value
-            
+            accumulate_item_bonuses(unit, item["stats"])
+            unit.setdefault("items", [])
             # Сохраняем копию предмета в юните, чтобы можно было вернуть при продаже
             unit["items"].append(dict(item))
-        
+
         # Удаляем предмет из инвентаря (он теперь на юните)
         player.items.pop(item_idx)
-        
+
         return unit
-
-    def remove_item_from_unit(self, player, unit_idx: int) -> dict:
-        """Снять предмет с юнита и вернуть в инвентарь.
-        
-        Returns:
-            Снятый предмет.
-        """
-        if unit_idx < 0 or unit_idx >= len(player.board):
-            raise ShopError(f"Индекс юнита {unit_idx} вне диапазона")
-
-        # Предметы хранятся в стат_словах юнита, а не как отдельный объект
-        # Для простоты: снимаем все бонусы (восстанавливаем базовые)
-        # В полной версии здесь было бы хранение original_stats
-        return None
 
     def roll_items(self, count: int = 3) -> list[dict]:
         """Ролл предметов в магазине."""

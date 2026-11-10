@@ -23,6 +23,9 @@ apply_passive_bonuses() и всегда считаются от ``_base_*`` зн
 """
 
 
+from game.core.unit_name import star_multiplier
+
+
 def calculate_synergy_bonuses(team_units: list[dict], synergy_data: dict) -> dict:
     """Рассчитать все активные бонусы синергий для команды.
 
@@ -98,6 +101,72 @@ def calculate_race_bonuses(team_units: list[dict], race_synergy_data: dict) -> d
     return result
 
 
+def calculate_unity_bonuses(team_units: list[dict], race_synergy_data: dict) -> dict:
+    """Рассчитать бонус «Единство» для людей: за каждый уникальный класс в команде.
+
+    Аналогично calculate_race_bonuses(), но бонус масштабируется числом уникальных
+    классов в команде (не только числом людей). Возвращает бонус только для расы
+    «human», если у людей активирован хотя бы один порог синергии.
+
+    Args:
+        team_units: список юнитов в команде (каждый с полями 'race', 'class')
+        race_synergy_data: структура расовых синергий из data/units.json ['race_synergies']
+
+    Returns:
+        Словарь {"human": {"unity_damage_pct": N, "unity_hp_pct": N}} или {}.
+    """
+    human_info = race_synergy_data.get("human")
+    if not human_info:
+        return {}
+
+    # Подсчёт людей и уникальных классов во всей команде
+    human_count = 0
+    unique_classes = set()
+    for unit in team_units:
+        if unit.get("race") == "human":
+            human_count += 1
+        cls = unit.get("class")
+        if cls:
+            unique_classes.add(cls)
+
+    if human_count == 0:
+        return {}
+
+    thresholds = human_info.get("thresholds", [])
+    bonuses = human_info.get("bonuses", {})
+
+    # Находим最大 активный порог для людей
+    active_bonus = None
+    for threshold in sorted(thresholds):
+        if human_count >= threshold:
+            bonus_key = str(threshold)
+            if bonus_key in bonuses:
+                active_bonus = bonuses[bonus_key]
+
+    if active_bonus is None:
+        return {}
+
+    class_count = len(unique_classes)
+    if class_count == 0:
+        return {}
+
+    base_damage = active_bonus.get("unity_damage_pct", 0)
+    base_hp = active_bonus.get("unity_hp_pct", 0)
+
+    if base_damage == 0 and base_hp == 0:
+        return {}
+
+    result = {
+        "human": {
+            "unity_damage_pct": base_damage * class_count,
+            "unity_hp_pct": base_hp * class_count,
+        }
+    }
+    udmg = result["human"]["unity_damage_pct"]
+    uhp = result["human"]["unity_hp_pct"]
+    return result
+
+
 def calculate_passive_bonuses(team_units: list[dict], unit_data: dict) -> dict:
     """Рассчитать пассивные бонусы от способностей юнитов.
 
@@ -157,6 +226,10 @@ def calculate_passive_bonuses(team_units: list[dict], unit_data: dict) -> dict:
             bonus_key = "damage_reduction_pct"
             bonus_value = effect_type["damage_reduction_pct_per_ally"] * ally_count
 
+        if bonus_value:
+            # Пассивка скейлится от звёзды юнита (★1 = ×1.0, ★2 = ×1.5, ★3 = ×2.0).
+            bonus_value = round(bonus_value * star_multiplier(unit.get("star", 1)))
+
         if bonus_value > 0 and bonus_key:
             result[name_base] = {
                 "passive_name": passive["name"],
@@ -214,8 +287,8 @@ def apply_race_bonuses(team_units: list[dict], race_bonuses: dict) -> list[dict]
 
     Поддерживает бонусы из calculate_race_bonuses():
     hp_bonus_pct, damage_bonus_pct, attack_speed_pct, crit_chance_bonus,
-    crit_damage_bonus_pct, damage_reduction_pct. Бонус всегда считается от
-    ``_base_*`` значений.
+    crit_damage_bonus_pct, damage_reduction_pct, evasion_pct, lifesteal_pct,
+    berserker, revive. Бонус всегда считается от ``_base_*`` значений.
 
     Args:
         team_units: исходные данные юнитов (у каждого есть 'race')
@@ -234,16 +307,49 @@ def apply_race_bonuses(team_units: list[dict], race_bonuses: dict) -> list[dict]
         u.setdefault("_base_damage", u.get("damage", 50))
         u.setdefault("_base_attack_speed", u.get("attack_speed", 1.0))
         u.setdefault("_base_crit_chance", u.get("crit_chance", 0))
+        u.setdefault("_base_damage_reduction_pct", u.get("damage_reduction_pct", 0))
+        u.setdefault("_base_crit_multiplier", u.get("crit_multiplier", 1.75))
 
+        # Процентные бонусы HP и урона складываются от базы (не компаундируются):
+        # базовый расовый бонус + unity (Единство людей за уникальные классы).
+        hp_pct_total = 0
         if "hp_bonus_pct" in bonuses:
-            u["hp"] = int(u["_base_hp"] * (1 + bonuses["hp_bonus_pct"] / 100))
+            hp_pct_total += bonuses["hp_bonus_pct"]
+        if "unity_hp_pct" in bonuses:
+            hp_pct_total += bonuses["unity_hp_pct"]
+        if hp_pct_total:
+            u["hp"] = int(u["_base_hp"] * (1 + hp_pct_total / 100))
+
+        damage_pct_total = 0
         if "damage_bonus_pct" in bonuses:
-            u["damage"] = u["_base_damage"] * (1 + bonuses["damage_bonus_pct"] / 100)
+            damage_pct_total += bonuses["damage_bonus_pct"]
+        if "unity_damage_pct" in bonuses:
+            damage_pct_total += bonuses["unity_damage_pct"]
+        if damage_pct_total:
+            u["damage"] = u["_base_damage"] * (1 + damage_pct_total / 100)
         if "attack_speed_pct" in bonuses:
             u["attack_speed"] = u["_base_attack_speed"] * (
                 1 + bonuses["attack_speed_pct"] / 100)
         if "crit_chance_bonus" in bonuses:
             u["crit_chance"] = u["_base_crit_chance"] + bonuses["crit_chance_bonus"]
+        if "damage_reduction_pct" in bonuses:
+            u["damage_reduction_pct"] = (
+                u["_base_damage_reduction_pct"] + bonuses["damage_reduction_pct"])
+        if "hp_regen_pct" in bonuses:
+            # Пороговый реген нежити накапливается на базовом поле из team.py,
+            # иначе бонус за 2/4 Units не доедет до движка.
+            u["hp_regen_pct"] = u.get("hp_regen_pct", 0) + bonuses["hp_regen_pct"]
+        if "crit_damage_bonus_pct" in bonuses:
+            u["crit_multiplier"] = (
+                u["_base_crit_multiplier"] + bonuses["crit_damage_bonus_pct"] / 100.0)
+        if "evasion_pct" in bonuses:
+            u["evasion_pct"] = bonuses["evasion_pct"]
+        if "lifesteal_pct" in bonuses:
+            u["lifesteal_pct"] = bonuses["lifesteal_pct"]
+        if "berserker" in bonuses:
+            u["berserker"] = bonuses["berserker"]
+        if "revive" in bonuses:
+            u["revive"] = bonuses["revive"]
 
         modified.append(u)
 

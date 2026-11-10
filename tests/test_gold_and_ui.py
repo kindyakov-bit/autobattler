@@ -291,10 +291,10 @@ class TestEffectGeneration:
             return d
 
         ui, sim = self._make(
-            [mk("Рыцарь", 3000, 60, 1.2, 1, "warrior", 10),
-             with_active("warrior_champion")],
-            [mk("Ветеран", 3000, 50, 1.0, 1, "warrior", 10),
-             with_active("archer_ranger")])
+            [mk("Крит-рыцарь", 3000, 80, 2.0, 1, "warrior", 100),
+             with_active("human_healer_priest")],
+            [mk("Цель", 50, 5, 1.0, 1, "warrior", 0),
+             mk("Танк", 5000, 5, 1.0, 1, "warrior", 0)])
         sim.run(max_ticks=600)
         effects = {"damage_numbers": [], "death_effects": [], "lines": [],
                    "ability_effects": [], "hit_particles": [], "critical_effects": []}

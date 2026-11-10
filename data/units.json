@@ -182,7 +182,7 @@
           }
         },
         "4": {
-          "damage_bonus_pct": 12,
+          "damage_bonus_pct": 10,
           "berserker": {
             "hp_thresholds": [
               50,
@@ -250,7 +250,7 @@
           "evasion_pct": 12
         },
         "4": {
-          "evasion_pct": 20
+          "evasion_pct": 16
         },
         "6": {
           "evasion_pct": 30

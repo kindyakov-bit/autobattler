@@ -29,15 +29,30 @@ SUPPORTED_ABILITY_TYPES = (
     "aura",
     "heal",
     "assassin_teleport",
+    "shield",
+    "dot",
+    "stun",
+    "taunt",
+    "heal_over_time",
+    "execute",
 )
 
 # Виды временных эффектов на юните
-KIND_DAMAGE_BONUS = "damage_bonus"
+KIND_DAMAGE_BONUS = "damage_bonus"          # плоская прибавка к урону
+KIND_DAMAGE_BONUS_PCT = "damage_bonus_pct"  # процентная прибавка к урону
+KIND_DAMAGE_DEALT_PCT = "damage_dealt_pct"  # снижение ИСХОДЯЩЕГО урона (дебафф)
 KIND_SPEED_PCT = "speed_pct"
-KIND_DAMAGE_REDUCTION = "damage_reduction"
+KIND_DAMAGE_REDUCTION = "damage_reduction"  # снижение ВХОДЯЩЕГО урона (щит)
 KIND_SLOW_PCT = "slow_pct"
 KIND_NEXT_ATTACK = "next_attack_bonus"
 KIND_CRIT_CHANCE = "crit_chance"
+
+# Временные эффекты новых типов способностей (§2)
+KIND_SHIELD = "shield"              # поглощающий щит (amount = запас поглощения)
+KIND_DOT = "dot"                    # урон по времени (damage_per_tick)
+KIND_STUN = "stun"                  # оглушение (пропуск хода)
+KIND_TAUNT = "taunt"                # провокация (source_id = кастер)
+KIND_HEAL_OVER_TIME = "heal_over_time"  # лечение со временем (heal_per_tick)
 
 # Лимиты радиуса урона по области
 MAX_AOE_TARGETS = {1: 1, 2: 3}
@@ -51,6 +66,11 @@ MOVE_TICKS_PER_COLUMN = 30
 
 # Лимит тиков одного боя
 MAX_BATTLE_TICKS = 900
+
+# Канонический таймскейл боя: 60 тиков = 1 секунда.
+# Автоатака уже использует этот таймскейл (_ticks_per_attack = ceil(60/as)).
+# Способности (cooldown/duration) должны жить в тех же тиках.
+TICKS_PER_SECOND = 60
 
 # ── Размеры тактического поля ──────────────────────────────────────────────
 BATTLE_ROWS = 5
@@ -110,10 +130,22 @@ class Unit:
         # Реально применённый урон (после снижения) — для честных цифр в UI
         self.last_damage = 0.0
 
+        # Расовая идентичность: уклонение (эльфы) — шанс увернуться от автоатаки
+        self.evasion_pct = 0.0
+        # Расовая идентичность: вампиризм (демоны) — хил от урона автоатаки
+        self.lifesteal_pct = 0.0
+        # Расовая идентичность: берсерк (орки) — конфиг {hp_thresholds, damage_pct, speed_pct}
+        self.berserker = None
+        # Расовая идентичность: восстание (нежить) — встать один раз на % HP
+        self.revive = None
+        self.revives_left = 0
+        self.just_revived = False
+
         # Ассасин: ожидание перед телепортом, флаг телепорта, цель —最弱 враг
         self.assassin_wait = 0          # тиков ожидания перед телепортом
         self.assassin_teleported = False  # уже телепортировался
         self.assassin_target_weakest = False  # бить самого слабого, а не ближнего
+        self.assassin_payload = None    # payload способности (урон/стан/дот при прибытии)
 
         # Таймер до следующей атаки (в тиках)
         self.attack_timer = self._ticks_per_attack()
@@ -137,13 +169,37 @@ class Unit:
             kind = st["kind"]
             if kind == KIND_DAMAGE_BONUS:
                 damage += st.get("amount", 0)
+            elif kind == KIND_DAMAGE_BONUS_PCT:
+                damage *= (1 + st.get("pct", 0) / 100)
+            elif kind == KIND_DAMAGE_DEALT_PCT:
+                damage *= (1 - st.get("pct", 0) / 100)
             elif kind == KIND_SPEED_PCT:
                 speed *= (1 + st.get("pct", 0) / 100)
             elif kind == KIND_SLOW_PCT:
                 speed *= (1 - st.get("pct", 0) / 100)
             elif kind == KIND_CRIT_CHANCE:
                 crit_chance += st.get("amount", 0)
-        self.damage = damage
+        # Берсерк (орки): динамический бонус урона и скорости от текущего HP%
+        # Находим наименьший порог ≥ текущий HP% (сильнейший применимый тир).
+        # Пороги и бонусы выровнены по индексу: thresholds[i] → damage_pcts[i]/speed_pcts[i].
+        if self.berserker:
+            thresholds = self.berserker.get("hp_thresholds", [])
+            damage_pcts = self.berserker.get("damage_pct", [])
+            speed_pcts = self.berserker.get("speed_pct", [])
+            if thresholds and damage_pcts and speed_pcts:
+                hp_pct = self.hp / max(self.max_hp, 1) * 100.0
+                best_idx = None
+                best_th = None
+                for i, th in enumerate(thresholds):
+                    if hp_pct <= th and (best_th is None or th < best_th):
+                        best_th = th
+                        best_idx = i
+                if best_idx is not None:
+                    dmg_pct = damage_pcts[min(best_idx, len(damage_pcts) - 1)]
+                    spd_pct = speed_pcts[min(best_idx, len(speed_pcts) - 1)]
+                    damage *= (1 + dmg_pct / 100.0)
+                    speed *= (1 + spd_pct / 100.0)
+        self.damage = max(0.0, damage)
         self.attack_speed = max(0.05, speed)
         self.crit_chance = crit_chance
 
@@ -203,20 +259,62 @@ class Unit:
         self.assassin_wait = eff.get("wait_ticks", 0)
         self.assassin_teleported = False
         self.assassin_target_weakest = eff.get("target_weakest", False)
+        self.assassin_payload = dict(eff)  # payload прибытия доступен уже после сброса
+        # Восстание (нежить): сбрасываем счётчик воскрешений на начало боя
+        if self.revive:
+            self.revives_left = self.revive.get("max_revives", 1)
+        self.just_revived = False
         self._refresh_stats()
 
     # ── Урон ───────────────────────────────────────────────────────────────
 
     def take_damage(self, amount: float) -> bool:
-        """Нанести урон (с учётом снижения урона). True если юнит умер."""
+        """Нанести урон (с учётом снижения урона и поглощения щитом).
+        True если юнит умер."""
         effective = max(0.0, amount * (1 - self.damage_reduction_pct() / 100))
-        self.hp -= effective
-        self.last_damage = effective
+        remaining = self._absorb_shield(effective)
+        self.hp -= remaining
+        self.last_damage = remaining
         if self.hp <= 0:
+            # Восстание (нежить): первый смертельный удар — встать на % HP
+            if self.revive and self.revives_left > 0:
+                self.hp = int(self.max_hp * self.revive["hp_pct"] / 100.0)
+                self.alive = True
+                self.revives_left -= 1
+                self.just_revived = True
+                self._refresh_stats()
+                return False  # не смерть — встал снова
             self.hp = 0
             self.alive = False
             return True
+        self._refresh_stats()  # берсерк реагирует на просадку HP mid-fight
         return False
+
+    def _absorb_shield(self, amount: float) -> float:
+        """Погасить урон активными щитами (KIND_SHIELD), вернуть остаток к HP."""
+        remaining = amount
+        for s in self.statuses:
+            if s["kind"] == KIND_SHIELD:
+                absorb = s.get("amount", 0)
+                if absorb <= 0:
+                    continue
+                take = min(remaining, absorb)
+                s["amount"] = absorb - take
+                remaining -= take
+                if remaining <= 0:
+                    break
+        return remaining
+
+    def is_stunned(self) -> bool:
+        """Юнит оглушён — пропускает движение, атаку и способность."""
+        return any(s["kind"] == KIND_STUN for s in self.statuses)
+
+    def taunt_source_id(self) -> int | None:
+        """ID кастера, который проверовал этого юнита (KIND_TAUNT), или None."""
+        for s in self.statuses:
+            if s["kind"] == KIND_TAUNT:
+                return s.get("source_id")
+        return None
 
     def tick(self, rng: random.Random | None = None) -> list[dict]:
         """Обработать один тик юнитом (атака). Возвращает события атак.
@@ -322,6 +420,10 @@ class BattleSimulator:
         и пассивки уже применены через build_combat_team(). Здесь только:
         создаём Unit, валидируем тип активной способности, расставляем по полю.
 
+        item_bonuses применяется только для «сырых» юнитов, переданных напрямую
+        (не через build_combat_team). Собранная команда item_bonuses не содержит,
+        поэтому двойного учёта нет.
+
         Поддерживаемые поля units_data:
             - item_bonuses: {"hp_bonus": 200, "damage_bonus": 25, ...}
             - active:       dict активной способности из units.json
@@ -370,6 +472,14 @@ class BattleSimulator:
             )
             u.hp_regen_pct = hp_regen_pct
             u.mana_per_kill = mana_per_kill
+            u._base_damage_reduction_pct = float(ud.get("damage_reduction_pct", 0))
+            # Новые расовые механики (race_synergies → apply_race_bonuses → unit_data → Unit)
+            u.evasion_pct = float(ud.get("evasion_pct", 0))
+            u.lifesteal_pct = float(ud.get("lifesteal_pct", 0))
+            u.berserker = ud.get("berserker")
+            u.revive = ud.get("revive")
+            u.revives_left = u.revive.get("max_revives", 1) if u.revive else 0
+            u.just_revived = False
 
             ability = ud.get("active")
             if ability:
@@ -380,7 +490,17 @@ class BattleSimulator:
                         f"'{atype}'. Поддерживаются: {', '.join(SUPPORTED_ABILITY_TYPES)}"
                     )
                 u.active_ability = dict(ability)
-                u.ability_cooldown = ability.get("cooldown", 3)
+                # Нормализация времени способности: секунды (данные) -> тики (движок).
+                cd_sec = ability.get("cooldown", 1.0)
+                u.active_ability["cooldown"] = max(1, round(cd_sec * TICKS_PER_SECOND))
+                eff = u.active_ability.get("effect")
+                if eff and "duration" in eff:
+                    eff = dict(eff)
+                    eff["duration"] = max(1, round(eff["duration"] * TICKS_PER_SECOND))
+                    u.active_ability["effect"] = eff
+                # mana_per_kill: секунды/килл -> тики/килл
+                u.mana_per_kill = int(ud.get("mana_per_kill", 0) * TICKS_PER_SECOND)
+                u.ability_cooldown = u.active_ability["cooldown"]
 
             self._next_id += 1
             team_units.append(u)
@@ -622,6 +742,7 @@ class BattleSimulator:
             if not self._cell_occupied_by_ally(unit, r, back_col):
                 unit.row, unit.col = r, back_col
                 unit.start_row, unit.start_col = r, back_col
+                self._apply_assassin_payload(unit)
                 return
         # Если все клетки заднего ряда заняты союзниками (маловероятно), ищем любую свободную
         for r in range(BATTLE_ROWS):
@@ -629,6 +750,7 @@ class BattleSimulator:
                 if not self._cell_occupied_by_ally(unit, r, c):
                     unit.row, unit.col = r, c
                     unit.start_row, unit.start_col = r, c
+                    self._apply_assassin_payload(unit)
                     return
 
     def _has_target_in_range(self, unit: Unit) -> bool:
@@ -642,6 +764,18 @@ class BattleSimulator:
     def _alive_enemies(self, unit: Unit) -> list[Unit]:
         return [u for t, lst in self.teams.items()
                 if t != unit.team for u in lst if u.alive]
+
+    def _taunt_target(self, unit: Unit) -> Unit | None:
+        """Если юнит проверован (KIND_TAUNT) и кастер жив — вернуть кастера.
+
+        Проверованный юнит должен атаковать/идти к источнику провокации."""
+        source_id = unit.taunt_source_id()
+        if source_id is None:
+            return None
+        source = self._find_unit(source_id)
+        if source is None or not source.alive or source.team == unit.team:
+            return None
+        return source
 
     def _enemies_in_radius(self, unit: Unit, radius: int) -> list[Unit]:
         """Цели урона по области: враги в радиусе `radius` около ближайшей цели.
@@ -674,6 +808,13 @@ class BattleSimulator:
 
         enemies = self._alive_enemies(attacker)
         if not enemies:
+            return []
+
+        # Таунт: проверенный юнит бьёт/идёт к источнику провокации.
+        taunt_target = self._taunt_target(attacker)
+        if taunt_target is not None:
+            if attacker.range_ >= self.distance(attacker, taunt_target):
+                return [taunt_target]
             return []
 
         radius = event.get("aoe_radius", 0)
@@ -715,6 +856,18 @@ class BattleSimulator:
         })
 
         for target in targets:
+            # Уклонение (эльфы): только против автоатаки, не DoT/абилок — гарантированный промах.
+            if target.evasion_pct > 0 and self.rng.random() < target.evasion_pct / 100.0:
+                damage_events.append({
+                    "type": "miss",
+                    "tick": self.tick_count,
+                    "attacker_id": event["attacker_id"],
+                    "target_id": target.unit_id,
+                    "damage": 0,
+                    "target_hp": target.hp,
+                })
+                continue
+
             variance = 0.9 + self.rng.random() * 0.2          # [0.9, 1.1]
             rolled = event["damage"] * variance
             died = target.take_damage(rolled)
@@ -731,8 +884,30 @@ class BattleSimulator:
             if died:
                 devent["type"] = "kill"
                 devent["killer_team"] = event["attacker_team"]
+            elif target.just_revived:
+                # Восстание (нежить): вместо убийства — воскрешение, сбросить флаг.
+                devent["type"] = "revive"
+                devent["revived_team"] = target.team
+                devent["revive_hp"] = target.hp
+                target.just_revived = False
 
             damage_events.append(devent)
+
+            # Вампиризм (демоны): хил атакующего от реально нанесённого урона автоатакой.
+            # Только автоатаки (не DoT/абилок), криты считаются полностью.
+            attacker = self._find_unit(event["attacker_id"])
+            if attacker and attacker.lifesteal_pct > 0:
+                heal = target.last_damage * attacker.lifesteal_pct / 100.0
+                if heal > 0:
+                    attacker.hp = min(attacker.max_hp, attacker.hp + heal)
+                    damage_events.append({
+                        "type": "lifesteal",
+                        "tick": self.tick_count,
+                        "attacker_id": attacker.unit_id,
+                        "target_id": target.unit_id,
+                        "heal": round(heal, 1),
+                        "target_hp": attacker.hp,
+                    })
 
         return damage_events
 
@@ -790,12 +965,12 @@ class BattleSimulator:
             for ally in self.teams.get(unit.team, []):
                 if not ally.alive:
                     continue
-                # damage_bonus_pct — бафф урона союзникам (Вождь орков "Крик войны")
+                # damage_bonus_pct — процентный бафф урона союзникам (Вождь орков "Крик войны")
                 if eff.get("damage_bonus_pct"):
                     ally.add_status(
-                        KIND_DAMAGE_BONUS,
+                        KIND_DAMAGE_BONUS_PCT,
                         eff.get("duration", 20),
-                        amount=eff.get("damage_bonus_pct", 0),
+                        pct=eff.get("damage_bonus_pct", 0),
                     )
                 # damage_reduction_pct — щит союзникам (Рыцарь "Щитовая стена")
                 if eff.get("damage_reduction_pct"):
@@ -828,13 +1003,14 @@ class BattleSimulator:
                 amount=eff.get("bonus_damage", 0),
                 radius=eff.get("radius", 1),
             )
-            # damage_reduction_pct — дебафф на ближайшего живого врага (Суккуб "Проклятие")
+            # damage_reduction_pct — дебафф на ближайшего живого врага (Суккуб "Проклятие"):
+            # снижает ИСХОДЯЩИЙ урон цели, а не входящий (иначе это был бы щит врагу).
             if eff.get("damage_reduction_pct"):
                 enemies = self._alive_enemies(unit)
                 if enemies:
                     target = min(enemies, key=lambda e: self.distance(unit, e))
                     target.add_status(
-                        KIND_DAMAGE_REDUCTION,
+                        KIND_DAMAGE_DEALT_PCT,
                         eff.get("duration", 10),
                         pct=eff.get("damage_reduction_pct", 25),
                     )
@@ -859,19 +1035,163 @@ class BattleSimulator:
             targets = [unit.unit_id]
             events.append(self._record_ability(unit, targets))
 
+        elif atype == "shield":
+            shield_amt = eff.get("shield", 0)
+            duration = eff.get("duration", 10)
+            targets_units = self._shield_targets(unit, eff)
+            for t in targets_units:
+                self._add_shield_status(t, shield_amt, duration)
+            events.append(self._record_ability(unit, [t.unit_id for t in targets_units]))
+
+        elif atype == "dot":
+            dpt = eff.get("damage_per_tick", 0)
+            duration = eff.get("duration", 5)
+            targets_units = self._dot_targets(unit, eff)
+            for t in targets_units:
+                t.add_status(KIND_DOT, duration, damage_per_tick=dpt)
+            events.append(self._record_ability(unit, [t.unit_id for t in targets_units]))
+
+        elif atype == "stun":
+            duration = eff.get("duration", 5)
+            radius = eff.get("radius", 1)
+            targets_units = [e for e in self._alive_enemies(unit)
+                             if self.distance(unit, e) <= radius]
+            for t in targets_units:
+                t.add_status(KIND_STUN, duration)
+            events.append(self._record_ability(unit, [t.unit_id for t in targets_units]))
+
+        elif atype == "taunt":
+            duration = eff.get("duration", 5)
+            radius = eff.get("radius", 2)
+            targets_units = [e for e in self._alive_enemies(unit)
+                             if self.distance(unit, e) <= radius]
+            for t in targets_units:
+                t.add_status(KIND_TAUNT, duration, source_id=unit.unit_id)
+            events.append(self._record_ability(unit, [t.unit_id for t in targets_units]))
+
+        elif atype == "heal_over_time":
+            hpt = eff.get("heal_per_tick", 0)
+            duration = eff.get("duration", 5)
+            targets_units = self._hot_targets(unit, eff)
+            for t in targets_units:
+                t.add_status(KIND_HEAL_OVER_TIME, duration, heal_per_tick=hpt)
+            events.append(self._record_ability(unit, [t.unit_id for t in targets_units]))
+
+        elif atype == "execute":
+            damage = eff.get("damage", 0)
+            threshold = eff.get("execute_threshold_pct", 0)
+            bonus = eff.get("bonus_vs_low_pct", 0)
+            enemies = self._alive_enemies(unit)
+            target_ids = []
+            if enemies:
+                target = min(enemies, key=lambda e: e.hp)
+                dmg = float(damage)
+                if threshold and target.hp < target.max_hp * threshold / 100.0:
+                    dmg = dmg * (1 + bonus / 100.0)
+                rolled = dmg * (0.9 + self.rng.random() * 0.2)
+                target.take_damage(rolled)
+                target_ids = [target.unit_id]
+            events.append(self._record_ability(unit, target_ids))
+
         elif atype == "assassin_teleport":
-            # Инициализация ассасина: установить время ожидания и флаг цели на слабого
+            # Инициализация ассасина: установить время ожидания и флаг цели на слабого.
+            # Payload прибытия (arrival_damage/stun/dot/execute_threshold) применяется
+            # в _teleport_assassin, когда ассасин появляется у цели.
             eff = ability.get("effect", {})
             if unit.assassin_teleported:
                 # Уже телепортировался — больше не перекастовываем способность
                 return []
             unit.assassin_wait = eff.get("wait_ticks", 60)
             unit.assassin_target_weakest = eff.get("target_weakest", True)
+            unit.assassin_payload = dict(eff)
             unit.ability_cooldown = -1  # Никогда больше не перекастовывается
             targets = [unit.unit_id]
             events.append(self._record_ability(unit, targets))
 
         return events
+
+    # ── Цели новых типов способностей ──────────────────────────────────────
+
+    def _shield_targets(self, unit: Unit, eff: dict) -> list[Unit]:
+        """Цели поглощающего щита: self / lowest_ally / all_allies."""
+        target_kind = eff.get("targets", "self")
+        allies = [a for a in self.teams.get(unit.team, []) if a.alive]
+        if target_kind == "all_allies":
+            return allies
+        if target_kind == "lowest_ally" and allies:
+            return [min(allies, key=lambda a: a.hp / max(a.max_hp, 1))]
+        return [unit]
+
+    def _add_shield_status(self, target: Unit, amount: int, duration: int) -> None:
+        """Наложить щит: суммировать amount с существующим, обновить duration."""
+        for s in target.statuses:
+            if s["kind"] == KIND_SHIELD:
+                s["amount"] = s.get("amount", 0) + amount
+                s["ticks"] = max(s.get("ticks", 0), duration)
+                return
+        target.add_status(KIND_SHIELD, duration, amount=amount)
+
+    def _dot_targets(self, unit: Unit, eff: dict) -> list[Unit]:
+        """Цели DoT: 'single' — ближайший в радиусе, иначе все враги в радиусе."""
+        radius = eff.get("radius", 1)
+        target_kind = eff.get("targets", "enemies_in_radius")
+        in_radius = [e for e in self._alive_enemies(unit)
+                     if self.distance(unit, e) <= radius]
+        if target_kind == "single" and in_radius:
+            return [min(in_radius, key=lambda e: self.distance(unit, e))]
+        return in_radius
+
+    def _hot_targets(self, unit: Unit, eff: dict) -> list[Unit]:
+        """Цели HoT: lowest_ally / all_allies / self."""
+        target_kind = eff.get("targets", "self")
+        allies = [a for a in self.teams.get(unit.team, []) if a.alive]
+        if target_kind == "all_allies":
+            return allies
+        if target_kind == "lowest_ally" and allies:
+            return [min(allies, key=lambda a: a.hp / max(a.max_hp, 1))]
+        return [unit]
+
+    def _apply_assassin_payload(self, unit: Unit) -> None:
+        """Применить payload прибытия ассасина к цели в точке телепорта."""
+        eff = getattr(unit, "assassin_payload", None) or {}
+        enemies = self._alive_enemies(unit)
+        if not enemies:
+            return
+        target_weakest = eff.get("target_weakest", True)
+        target = (min(enemies, key=lambda e: e.hp) if target_weakest
+                  else min(enemies, key=lambda e: self.distance(unit, e)))
+
+        arrival_damage = eff.get("arrival_damage")
+        if arrival_damage:
+            rolled = arrival_damage * (0.9 + self.rng.random() * 0.2)
+            target.take_damage(rolled)
+            self._ability_events.append({
+                "tick": self.tick_count,
+                "caster_id": unit.unit_id,
+                "caster_team": unit.team,
+                "ability_name": (unit.active_ability or {}).get("name", ""),
+                "ability_type": "assassin_teleport",
+                "targets": [target.unit_id],
+                "damage": rolled,
+            })
+
+        arrival_stun = eff.get("arrival_stun")
+        if arrival_stun:
+            target.add_status(KIND_STUN, int(arrival_stun))
+
+        arrival_dot = eff.get("arrival_dot")
+        if arrival_dot:
+            target.add_status(
+                KIND_DOT,
+                arrival_dot.get("duration", 5),
+                damage_per_tick=arrival_dot.get("damage_per_tick", 0),
+            )
+
+        # execute_threshold_pct: если цель ниже порога при прибытии — это execute
+        # (урон arrival_damage уже применён выше; порог фиксирует факт добивания).
+        _ = eff.get("execute_threshold_pct")
+
+    # ── АOE-урон ───────────────────────────────────────────────────────────
 
     def _apply_aoe_damage(self, caster: Unit, damage, radius: int) -> list[dict]:
         events = []
@@ -1061,6 +1381,7 @@ class BattleSimulator:
 
             # Kil trackers for this tick: {attacker_id: [target_ids]}
             kills_this_tick: dict[int, list[int]] = {}
+            log_start = len(self.log)  # чтобы не сканировать весь лог каждый тик
 
             for unit in all_units:
                 if not unit.alive:
@@ -1074,6 +1395,26 @@ class BattleSimulator:
                     heal = unit.max_hp * unit.hp_regen_pct / 100.0
                     if heal > 0:
                         unit.hp = min(unit.max_hp, unit.hp + heal)
+
+                # 1.6. DoT: урон по времени от эффекта на носителе (через take_damage)
+                dot = next((s for s in unit.statuses if s["kind"] == KIND_DOT), None)
+                if dot is not None and unit.alive:
+                    dpt = dot.get("damage_per_tick", 0)
+                    if dpt > 0:
+                        unit.take_damage(dpt)
+                if not unit.alive:
+                    continue
+
+                # 1.7. HoT: лечение со временем от эффекта на носителе
+                hot = next((s for s in unit.statuses if s["kind"] == KIND_HEAL_OVER_TIME), None)
+                if hot is not None and unit.alive:
+                    hpt = hot.get("heal_per_tick", 0)
+                    if hpt > 0:
+                        unit.hp = min(unit.max_hp, unit.hp + hpt)
+
+                # 1.8. Оглушение: пропуск хода (движение, атака и способность)
+                if unit.is_stunned():
+                    continue
 
                 # 2. Кулдаун способности
                 if unit.active_ability and unit.ability_cooldown > 0:
@@ -1092,23 +1433,27 @@ class BattleSimulator:
                 # 3. Проверяем, есть ли цель в радиусе ДО движения — иначе
                 # юнит из заднего ряда «тратит» перезарядкуattack, пока идёт
                 # к врагу, и бьёт одновременно с передовой, что ломает баланс.
+                taunt_target = self._taunt_target(unit)
                 can_attack = self._has_target_in_range(unit)
+                if taunt_target is not None:
+                    can_attack = self.distance(unit, taunt_target) <= unit.range_
 
                 # 3. Движение к цели / удержание дистанции
                 enemies = self._alive_enemies(unit)
                 if enemies:
-                    nearest = min(enemies, key=lambda e: self.distance(unit, e))
-                    dist = self.distance(unit, nearest)
+                    move_target = taunt_target if taunt_target is not None else min(
+                        enemies, key=lambda e: self.distance(unit, e))
+                    dist = self.distance(unit, move_target)
                     if unit.range_ <= 1:
                         # Мили: approaches up to distance 1
                         if dist > 1:
-                            self._move_towards(unit, nearest.row, nearest.col)
+                            self._move_towards(unit, move_target.row, move_target.col)
                     else:
                         # Дальние: держать дистанцию range_
                         if dist < unit.range_:
-                            self._move_away(unit, nearest)
+                            self._move_away(unit, move_target)
                         elif dist > unit.range_:
-                            self._move_towards(unit, nearest.row, nearest.col)
+                            self._move_towards(unit, move_target.row, move_target.col)
 
                 # 4. Атака (по таймеру) — только если есть цель в радиусе
                 if can_attack:
@@ -1127,10 +1472,8 @@ class BattleSimulator:
                         self.log.extend(self._cast_ability(unit))
                         unit.ability_cooldown = unit.active_ability.get("cooldown", 3)
 
-            # Собрать киллы за этот тик из лога (только новые события)
-            for evt in self.log:
-                if evt.get("tick") != self.tick_count:
-                    continue
+            # Собрать киллы за этот тик из новых событий лога
+            for evt in self.log[log_start:]:
                 if evt.get("type") in ("kill", "ability_kill"):
                     killer_id = evt.get("attacker_id") or evt.get("caster_id")
                     if killer_id is not None:

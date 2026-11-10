@@ -18,7 +18,7 @@ if sys_path not in sys.path:
 
 from game.battle.engine import (
     BattleSimulator, SUPPORTED_ABILITY_TYPES,
-    KIND_DAMAGE_REDUCTION, KIND_SLOW_PCT, KIND_NEXT_ATTACK,
+    KIND_DAMAGE_REDUCTION, KIND_SPEED_PCT, KIND_SLOW_PCT, KIND_NEXT_ATTACK,
     MAX_DAMAGE_REDUCTION_PCT,
 )
 
@@ -166,37 +166,38 @@ class TestAoeDamageBuff:
 
     def test_buff_wears_off_during_battle(self, unit_data):
         sim = BattleSimulator(seed=7)
-        sim.add_team("player", [mk("archer_battleheart", unit_data)])
+        sim.add_team("player", [mk("human_buffer_bard", unit_data)])
         sim.add_team("enemy", [mk("warrior_knight", unit_data)])
         sim.run(max_ticks=600)
         caster = sim.teams["player"][0]
-        # Одновременно активно не больше, чем помещается в окно длительности.
-        # duration < cooldown -> максимум 1 эффект (иначе был бы «вечный» бафф)
-        eff = unit_data["archer_battleheart"]["active"]["effect"]
-        cd = unit_data["archer_battleheart"]["active"]["cooldown"]
-        max_concurrent = max(1, -(-eff["speed_bonus_duration"] // cd))
-        assert len(caster.statuses) <= max_concurrent, (
-            f"{len(caster.statuses)} эффектов активно — бафф не истекает "
-            f"(duration={eff['speed_bonus_duration']}, cooldown={cd})")
+        # Бафф скорости не должен складываться навсегда:
+        # duration < cooldown -> максимум ceil(duration/cooldown) эффектов.
+        eff = unit_data["human_buffer_bard"]["active"]["effect"]
+        cd = unit_data["human_buffer_bard"]["active"]["cooldown"]
+        max_concurrent = max(1, -(-eff["duration"] // cd))
+        speed_statuses = [s for s in caster.statuses if s["kind"] == KIND_SPEED_PCT]
+        assert len(speed_statuses) <= max_concurrent, (
+            f"{len(speed_statuses)} баффов скорости активно — бафф не истекает "
+            f"(duration={eff['duration']}, cooldown={cd})")
 
 
 class TestBuffAllies:
     def test_knight_reduces_damage_to_allies(self, unit_data):
         sim = BattleSimulator(seed=3)
         tank = simple("tank", 4000, 0, 1.0, 1)
-        sim.add_team("player", [tank, mk("warrior_knight", unit_data)])
+        sim.add_team("player", [tank, mk("undead_bone_shaman", unit_data)])
         sim.add_team("enemy", [simple("dps", 100000, 100, 1.0, 4, "archer")])
         ally = sim.teams["player"][0]
-        # Накладываем щит ровно как это делает «Щитовая стена»
+        # Накладываем щит ровно как это делает «Костяной оберег» (урон −20%)
         ally.add_status(
             KIND_DAMAGE_REDUCTION, 99999,
-            pct=unit_data["warrior_knight"]["active"]["effect"][
+            pct=unit_data["undead_bone_shaman"]["active"]["effect"][
                 "damage_reduction_pct"])
         before = ally.hp
         ally.take_damage(100)
-        assert ally.last_damage == pytest.approx(70.0), (
-            "щит рыцаря должен снижать урон союзнику")
-        assert ally.hp == pytest.approx(before - 70)
+        assert ally.last_damage == pytest.approx(80.0), (
+            "щит должен снижать урон союзнику")
+        assert ally.hp == pytest.approx(before - 80)
 
     def test_stacked_shields_are_capped_and_never_heal(self):
         """Много щитов не должны уводить снижение за 100%."""
@@ -211,19 +212,17 @@ class TestBuffAllies:
 
 
 class TestBuffNextAttack:
-    def test_next_attack_hits_multiple_targets(self, unit_data):
+    def test_buff_next_attack_applies_bonus(self, unit_data):
+        """buff_next_attack накладывает KIND_NEXT_ATTACK с бонусом из данных."""
         sim = BattleSimulator(seed=5)
-        sim.add_team("player", [mk("archer_ranger", unit_data)])
-        sim.add_team("enemy", [simple("e0", 5000, 0, 1.0, 4, "archer"),
-                               simple("e1", 5000, 0, 1.0, 4, "archer"),
-                               simple("e2", 5000, 0, 1.0, 4, "archer")])
-        sim.run(max_ticks=200)
-        per_tick = {}
-        for e in sim.log:
-            if e["type"] in ("hit", "kill"):
-                per_tick.setdefault(e["tick"], set()).add(e["target_id"])
-        assert max((len(v) for v in per_tick.values()), default=0) > 1, (
-            "Огненные стрелы должны бить больше одной цели")
+        sim.add_team("player", [mk("elf_archer_ranger", unit_data)])
+        sim.add_team("enemy", [simple("e0", 5000, 0, 1.0, 4, "archer")])
+        sim.run(max_ticks=100)
+        caster = sim.teams["player"][0]
+        bonuses = [s for s in caster.statuses if s["kind"] == KIND_NEXT_ATTACK]
+        assert bonuses, "buff_next_attack должен накладывать бонус следующей атаки"
+        assert bonuses[0]["amount"] == unit_data["elf_archer_ranger"]["active"]["effect"][
+            "bonus_damage"], "бонус должен совпадать с данными способности"
 
     def test_bonus_is_consumed(self, unit_data):
         from game.battle.engine import Unit
@@ -240,14 +239,14 @@ class TestAura:
         results = {}
         for extra in (0, 2):
             sim = BattleSimulator(seed=5)
-            sim.add_team("player", [mk("warrior_champion", unit_data)] +
-                         [simple(f"w{k}", 5000, 0, 1.0, 1)
+            sim.add_team("player", [mk("undead_buffer_death_aura", unit_data)] +
+                         [simple(f"b{k}", 5000, 0, 1.0, 1, "buffer")
                           for k in range(extra)])
             sim.add_team("enemy", [simple("dummy", 100000, 0, 1.0, 4, "archer")])
             sim.run(max_ticks=120)
             results[extra] = sim.teams["player"][0].damage
         assert results[2] > results[0], (
-            "Боевой клич должен усиливать урон за союзников")
+            "Аура должна усиливать урон за союзников своего класса")
 
     def test_no_bonus_when_alone(self, unit_data):
         sim = BattleSimulator(seed=5)

@@ -8,7 +8,29 @@ from game.core.synergies import (
     calculate_synergy_bonuses, apply_synergy_bonuses,
     calculate_race_bonuses, apply_race_bonuses,
     calculate_passive_bonuses, apply_passive_bonuses,
+    calculate_unity_bonuses,
 )
+from game.core.unit_name import base_name, star_multiplier
+
+# Множитель силовых полей способности по тиру юнита (cost).
+TIER_ABILITY_MULT = {1: 1.0, 2: 1.25, 3: 1.5, 4: 1.8, 5: 2.2}
+# Поля effect, которые масштабируются звёздами и тиром.
+# Длительность, радиус, проценты и тактовые задержки НЕ масштабируются.
+ABILITY_SCALABLE_KEYS = {
+    "damage", "heal", "shield", "bonus_damage",
+    "damage_per_tick", "heal_per_tick", "absorb", "arrival_damage",
+}
+
+
+def _scale_ability_effect(effect: dict | None, factor: float) -> dict:
+    """Вернуть копию effect с силовыми полями, масштабированными на factor."""
+    if not effect:
+        return {}
+    scaled = dict(effect)
+    for key in ABILITY_SCALABLE_KEYS:
+        if key in scaled:
+            scaled[key] = round(scaled[key] * factor)
+    return scaled
 
 
 def build_combat_team(
@@ -41,17 +63,16 @@ def build_combat_team(
     team = []
     for u in units_data:
         name = u.get("name", "")
-        name_base = name.split("★")[0]
+        name_base = base_name(name)
         if name_base not in all_units:
             continue
         ud = all_units[name_base]
 
         star = u.get("star", 1)
-        hp_mult = 1.5 if star == 2 else 2.0 if star == 3 else 1.0
-        dmg_mult = 1.5 if star == 2 else 2.0 if star == 3 else 1.0
+        mult = star_multiplier(star)
 
-        hp = int(ud["hp"] * hp_mult)
-        damage = float(ud["damage"]) * dmg_mult
+        hp = int(ud["hp"] * mult)
+        damage = float(ud["damage"]) * mult
         attack_speed = float(ud["attack_speed"])
 
         # Предметы
@@ -74,6 +95,7 @@ def build_combat_team(
             "crit_damage_bonus_pct", 0
         ) / 100.0
         hp_regen_pct = race_bonuses.get("hp_regen_pct", 0)
+        damage_reduction_pct = race_bonuses.get("damage_reduction_pct", 0)
         mana_per_kill = ud.get("mana_per_kill", 0)  # ускорение к/д за килл (магия)
 
         unit_data = {
@@ -88,15 +110,20 @@ def build_combat_team(
             "crit_chance": crit_chance,
             "crit_multiplier": crit_multiplier,
             "hp_regen_pct": hp_regen_pct,
+            "damage_reduction_pct": damage_reduction_pct,
             "mana_per_kill": mana_per_kill,
             "row": u.get("row"),
             "col": u.get("col"),
         }
 
         if ud.get("active"):
+            cost = ud.get("cost", 1)
+            factor = star_multiplier(star) * TIER_ABILITY_MULT.get(cost, 1.0)
             unit_data["active"] = dict(ud["active"])
-        if "item_bonuses" in u:
-            unit_data["item_bonuses"] = u["item_bonuses"]
+            unit_data["active"]["effect"] = _scale_ability_effect(
+                unit_data["active"].get("effect", {}), factor)
+        # item_bonuses сюда НЕ пробрасываем: они уже применены к hp/damage/speed
+        # выше. Иначе BattleSimulator.add_team применил бы их второй раз.
 
         team.append(unit_data)
 
@@ -108,6 +135,16 @@ def build_combat_team(
     # Расовые синергии (human/orc/demon/elf/undead 2/4)
     if race_synergy_data:
         race_bonuses_map = calculate_race_bonuses(team, race_synergy_data)
+        # Единство людей: бонус за уникальные классы масштабирует расовый бонус
+        unity = calculate_unity_bonuses(team, race_synergy_data)
+        if unity:
+            for race_name, ub in unity.items():
+                if race_name in race_bonuses_map:
+                    # Копия, чтобы не мутировать исходные данные JSON
+                    race_bonuses_map[race_name] = dict(race_bonuses_map[race_name])
+                    race_bonuses_map[race_name].update(ub)
+                else:
+                    race_bonuses_map[race_name] = ub
         team = apply_race_bonuses(team, race_bonuses_map)
 
     # Пассивные способности (synergy_buff по классу или расе)

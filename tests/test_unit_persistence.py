@@ -57,7 +57,8 @@ def run_draft(ui, units, gold=10, round_num=2):
         ]
         return ui._run_interactive_draft(
             round_num=round_num, is_creep=False, synergy_data={},
-            seed=42, existing_units={"units": units_with_pos, "gold": gold})
+            seed=42, existing_units={"units": units_with_pos, "gold": gold,
+                                     "level": 6})
     finally:
         pygame.event.get = real
 
@@ -106,15 +107,15 @@ class TestStarPersistence:
         units = [{"name": "warrior_freshman", "star": 2}]
         player_units, _, _, _, _, _, _, _, _ = run_draft(draft_env, units)
         assert player_units, "состав потерялся"
-        # HP ★2 = 500*1.5 = 750; если звёздность потеряна, будет 500
+        # HP ★2 = 400*1.5 = 600 (перебаланс типов: warrior t1 = 400); если звёздность потеряна, будет 400
         hp = player_units[0]["hp"]
-        assert hp > 700, f"HP {hp} — звёздность ★2 потерялась (ожидали 750)"
+        assert hp > 550, f"HP {hp} — звёздность ★2 потерялась (ожидали 600)"
 
     def test_star3_survives_restore(self, draft_env):
         units = [{"name": "warrior_freshman", "star": 3}]
         player_units, _, _, _, _, _, _, _, _ = run_draft(draft_env, units)
         hp = player_units[0]["hp"]
-        assert hp > 950, f"HP {hp} — звёздность ★3 потерялась (ожидали 1000)"
+        assert hp > 700, f"HP {hp} — звёздность ★3 потерялась (ожидали 800)"
 
     def test_star_name_format_is_parsable_by_shop(self, draft_env):
         """Имя 'name★2' должно парситься Shop.place обратно в star=2."""

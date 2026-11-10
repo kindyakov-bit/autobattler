@@ -13,6 +13,7 @@ import random
 import time
 import pygame
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).parent.parent.resolve()
@@ -21,8 +22,20 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from ui.sprites import draw_unit_sprite, draw_item_icon, draw_tooltip, preload_sprites, preload_unit_sprites, load_ui_texture
 from game.core.team import build_combat_team
-from game.core.player import Player
-from game.core.shop import ROLL_COST
+from game.core.player import Player, BENCH_MAX
+from game.core.shop import ROLL_COST, accumulate_item_bonuses, ShopError
+from game.core.economy import START_HP, pvp_round_damage
+from game.core.unit_name import base_name, star_level, star_multiplier
+
+
+@lru_cache(maxsize=16)
+def _cached_font(size: int, bold: bool = False):
+    """Шрифт создаётся один раз на (size, bold). Эффекты боя рисуются каждый
+    кадр, и пересоздание SysFont на каждый кадр было заметной утечкой CPU."""
+    try:
+        return pygame.font.SysFont("arial", size, bold=bold)
+    except Exception:
+        return pygame.font.Font(None, size)
 
 # ── Раскладка фазы драфта: единая система масштабирования ──────────────────
 # Все размеры вычисляются от констант ниже. Хитбоксы и рисование используют
@@ -44,8 +57,9 @@ BENCH_Y0 = 268
 BENCH_COLS = 3          # 3 колонки (было 5)
 BENCH_CELL_SIZE = 95    # размер одной ячейки скамейки
 BENCH_CELL_MARGIN = 10  # отступ между ячейками скамейки
+BENCH_SIDE_PAD = BENCH_X0 - 10  # отступ слотов от краёв рамки (панель начинается с x=10)
 BENCH_ROWS = 3          # 3 строки (было 2)
-BENCH_MAX = 9           # макс. ячеек на скамейке (было 10)
+# BENCH_MAX импортируется из game.core.player — единый источник для ядра и UI.
 
 # ── Board (тактическое поле 5×5) constants ──────────────────────────────
 BOARD_Y0 = 268
@@ -72,10 +86,11 @@ COLOR_TEXT_BG = (0, 0, 0, 140)         # полупрозрачный черны
 # Цвет рамки по цене юнита — как в TFT/Underlords: сразу видно, что дорого.
 # Ключ — цена из data/units.json.
 TIER_COLORS = {
-    1: (150, 150, 150),   # обычный
-    2: (90, 200, 120),    # необычный
-    3: (90, 150, 255),    # редкий
-    5: (200, 120, 255),   # легендарный
+    1: (150, 150, 150),   # серый (обычный)
+    2: (90, 200, 120),    # зелёный (необычный)
+    3: (90, 150, 255),    # синий (редкий)
+    4: (255, 215, 0),     # жёлтый (эпический)
+    5: (255, 140, 0),     # оранжевый (легендарный)
 }
 TIER_COLOR_DEFAULT = (150, 150, 150)
 
@@ -86,35 +101,49 @@ STAR_CHAR = "*"
 # Килл-бонус: золото за каждого убитого врага (экономика «фарм на боях»).
 KILL_GOLD_PER_UNIT = 1
 
-# Цвет рамки по цене юнита — как в TFT/Underlords: сразу видно, что дорого.
-# Ключ — цена из data/units.json.
-TIER_COLORS = {
-    1: (150, 150, 150),   # обычный
-    2: (90, 200, 120),    # необычный
-    3: (90, 150, 255),    # редкий
-    5: (200, 120, 255),   # легендарный
-}
-TIER_COLOR_DEFAULT = (150, 150, 150)
+# ── Геометрия полосы продажи под панелью бенча (вычисляется в _sell_bin_rect) ──
 
-# Символ звезды. '★' (U+2605) отсутствует в стандартных шрифтах pygame и
-# рисуется квадратом-заглушкой, поэтому используем '*'.
-STAR_CHAR = "*"
 
-# Килл-бонус: золото за каждого убитого врага (экономика «фарм на боях»).
-KILL_GOLD_PER_UNIT = 1
+
+# ── Панель участников матча (игрок + 7 ботов) ──────────────────────────────
+# Горизонтальный компактный список в верхней части экрана (под HUD, над
+# магазином в драфте и над полем боя). Все 8 участников помещаются без скролла.
+PLAYER_LIST_Y = 44          # верхняя панель (под HUD, над магазином/полем боя)
+PLAYER_LIST_H = 40          # высота панели (размещается между HUD и магазином/полем боя)
+PLAYER_LIST_PAD = 8         # отступ между элементами и краями
+PLAYER_LIST_ITEM_H = 24     # высота элемента одного участника
+HP_BAR_W = 56               # ширина полоски HP участника
+HP_BAR_H = 4
+
+# Цвета индикатора HP (зелёный > 50, жёлтый 25-50, красный < 25).
+COLOR_HP_GREEN = (90, 220, 90)
+COLOR_HP_YELLOW = (235, 200, 60)
+COLOR_HP_RED = (235, 80, 80)
+COLOR_TEXT_MUTED = (150, 150, 160)
+COLOR_PLAYER_GOLD = (255, 215, 0)
+COLOR_DEAD_TEXT = (120, 120, 120)
+
+# Горячая клавиша сводной таблицы.
+KEY_LEADERBOARD = pygame.K_TAB
 
 
 # ── Visual effects system ────────────────────────────────────────────────
 
 class DamageNumber:
-    """Floating damage number that appears on a unit."""
+    """Floating damage number or text label (MISS / REVIVE / +heal) over a unit."""
     def __init__(self, x, y, amount, color=(255, 100, 50)):
         self.x = x
         self.y = y
-        self.amount = int(amount)
         self.color = color
         self.life = 40  # frames to live
         self.max_life = 40
+        # Строка — отображаемая метка (MISS/REVIVE/+N), число — урон ("-N").
+        if isinstance(amount, str):
+            self.amount = 0
+            self.label = amount
+        else:
+            self.amount = int(amount)
+            self.label = None
 
     def update(self):
         self.y -= 1.5
@@ -122,7 +151,8 @@ class DamageNumber:
         return self.life > 0
 
     def draw(self, screen, font):
-        surf = font.render(f"-{self.amount}", True, self.color)
+        text = self.label if self.label is not None else f"-{self.amount}"
+        surf = font.render(text, True, self.color)
         # Draw with slight shadow for readability
         sx, sy = int(self.x), int(self.y)
         screen.blit(surf, (sx - 1, sy + 1))
@@ -331,20 +361,14 @@ class AbilityEffect:
         
         # Draw ability name above effect
         if self.life > self.max_life - 5:
-            try:
-                _font = pygame.font.SysFont("arial", 16, bold=True)
-            except Exception:
-                _font = pygame.font.Font(None, 16)
-            name_surf = _font.render(self.ability_name.upper(), True, 
+            _font = _cached_font(16, bold=True)
+            name_surf = _font.render(self.ability_name.upper(), True,
                                   self.COLORS.get(self.effect_type, ((255, 255, 0)))[1])
             r = name_surf.get_rect(center=(int(self.x), int(self.y) - self.ring_radius - 15))
             screen.blit(name_surf, r)
 
     def _font_render(self, text, bold, color):
-        try:
-            return pygame.font.SysFont("arial", 16, bold=bold).render(text, True, color)
-        except Exception:
-            return pygame.font.Font(None, 16).render(text, True, color)
+        return _cached_font(16, bold=bold).render(text, True, color)
 
 
 # ── Main UI class ────────────────────────────────────────────────────────
@@ -387,6 +411,12 @@ class GameUI:
         self.drag_board_idx = None  # индекс юнита на доске, которого тащим с клетки на клетку
         self.drag_board_orig = None  # исходная (row, col) для возврата, если клетка занята
         self.drag_board_data = None  # данные юнта (имя, звезда, статы) при драге с поля
+        self.draft_message = None  # (текст, tick) для показа причины отказа ShopError
+        # ── Состояние панели участников / просмотра доски / лидерборда ─────
+        self.leaderboard_open = False          # Tab — сводная таблица всех участников
+        self.viewing_board = None              # None | ("player",) | ("bot", index)
+        self.player_list_rects = []            # [(rect, participant)] для хит-тестов клика
+        self._game_instance = None             # ссылка на Game для режима просмотра (run(game))
 
     def rng_shake(self) -> float:
         """Случайное число 0..1 для тряски."""
@@ -676,9 +706,20 @@ class GameUI:
 
         y_start = panel_y + 24
         for i, event in enumerate(log[-max_lines:]):
-            if event.get("type") == "kill":
+            etype = event.get("type", "")
+            if etype == "kill":
                 text = f"KILL tick {event.get('tick', '?')}"
                 color = (255, 100, 100)
+            elif etype == "miss":
+                text = f"MISS tick {event.get('tick', '?')}"
+                color = (180, 180, 180)
+            elif etype == "lifesteal":
+                heal = event.get("heal", 0)
+                text = f"Вампир +{heal:.0f} HP tick {event.get('tick', '?')}"
+                color = (100, 255, 100)
+            elif etype == "revive":
+                text = f"ВОСКРЕШЕНИЕ tick {event.get('tick', '?')}"
+                color = (200, 200, 100)
             else:
                 dmg = event.get("damage", 0)
                 text = f"[{event.get('tick', '?')}] hit: {dmg:.1f} dmg"
@@ -884,11 +925,365 @@ class GameUI:
         btn_text = self.font_small.render("Продолжить", True, (255, 255, 255))
         self.screen.blit(btn_text, btn_text.get_rect(center=(cx, btn_y + btn_h // 2)))
 
+    # ── Участники матча: сбор данных ──────────────────────────────────────
+
+    def _hp_color(self, hp: int, max_hp: int):
+        """Цвет индикатора HP: зелёный > 50, жёлтый 25-50, красный < 25."""
+        if max_hp <= 0:
+            return COLOR_DEAD_TEXT
+        pct = hp / max_hp
+        if pct > 0.5:
+            return COLOR_HP_GREEN
+        if pct > 0.25:
+            return COLOR_HP_YELLOW
+        return COLOR_HP_RED
+
+    def _board_units_for_player(self, player) -> list:
+        """Привести board игрока к списку единиц для отображения в доске."""
+        out = []
+        for u in player.board:
+            base = base_name(u["name"])
+            star = int(u.get("star", 1))
+            ud = self.all_units.get(base, {})
+            out.append({
+                "name": self.display_name(u["name"]),
+                "key": base,
+                "star": star,
+                "cls": ud.get("class", "warrior"),
+                "cost": ud.get("cost", 1),
+                "race": ud.get("race", "human"),
+            })
+        return out
+
+    def _gather_participants(self) -> list:
+        """Собрать список участников (игрок + боты) для панели и таблицы.
+
+        Источник данных зависит от режима:
+          - интерактивный матч (run_interactive_match): self.match_bots
+          - просмотр записи (run(game)): game_instance.bots
+        """
+        participants = []
+        interactive = getattr(self, "match_bots", None) is not None
+        game = self._game_instance
+
+        if interactive:
+            player = getattr(self, "player", None)
+            player_hp = self.player_hp
+            bots = self.match_bots
+        elif game is not None:
+            player = getattr(self, "player", None)
+            player_hp = game.player_hp
+            bots = game.bots
+        else:
+            player = getattr(self, "player", None)
+            player_hp = getattr(self, "player_hp", START_HP)
+            bots = []
+
+        # Игрок — всегда первый (индекс 0).
+        if player is not None:
+            participants.append({
+                "kind": "player", "index": 0, "name": "Player",
+                "hp": int(player_hp), "max_hp": START_HP,
+                "level": int(getattr(player, "level", 1)),
+                "gold": int(getattr(player, "gold", 0)),
+                "board_units": self._board_units_for_player(player),
+                "bench_count": len(getattr(player, "reserve", [])),
+                "dead": player_hp <= 0,
+            })
+        else:
+            participants.append({
+                "kind": "player", "index": 0, "name": "Player",
+                "hp": int(player_hp), "max_hp": START_HP,
+                "level": 1, "gold": 0,
+                "board_units": [], "bench_count": 0,
+                "dead": player_hp <= 0,
+            })
+
+        # Боты.
+        for i, bot in enumerate(bots):
+            participants.append({
+                "kind": "bot", "index": i + 1, "name": bot.get("name", f"Bot {i+1}"),
+                "hp": int(bot.get("hp", START_HP)), "max_hp": START_HP,
+                "level": int(bot.get("level", 1)),
+                "gold": int(bot.get("gold", 0)),
+                "board_units": bot.get("board_units", []),
+                "bench_count": 0,
+                "dead": bot.get("hp", START_HP) <= 0,
+            })
+        return participants
+
+    def _find_participant(self, participants):
+        if self.viewing_board is None:
+            return None
+        kind, index = self.viewing_board
+        for p in participants:
+            if p["kind"] == kind and p["index"] == index:
+                return p
+        return None
+
+    def _is_viewing(self, p) -> bool:
+        if self.viewing_board is None:
+            return False
+        if p["kind"] == "player":
+            return self.viewing_board == ("player",)
+        return self.viewing_board == ("bot", p["index"])
+
+    def handle_player_list_click(self, mx: int, my: int) -> bool:
+        """Клик по панели участников — открыть/закрыть доску участника.
+        Возвращает True, если клик обработан 판еллю."""
+        for rect, p in self.player_list_rects:
+            if rect.collidepoint(mx, my):
+                self.leaderboard_open = False
+                if p["kind"] == "player":
+                    self.viewing_board = ("player", 0)
+                else:
+                    self.viewing_board = ("bot", p["index"])
+                self.play_sound("click")
+                return True
+        return False
+
+    # ── Отрисовка: панель участников ──────────────────────────────────────
+
+    def draw_player_list_panel(self, participants):
+        """Горизонтальная компактная панель всех участников (верх экрана).
+
+        Показывает имя, HP (цветовая индикация), уровень, золото (игрок) и
+        статус жив/выбыл. Клик по элементу открывает доску участника.
+        """
+        n = len(participants)
+        if n == 0:
+            return
+        panel_x = PLAYER_LIST_PAD
+        panel_y = PLAYER_LIST_Y
+        panel_w = self.width - 2 * PLAYER_LIST_PAD
+        panel_h = PLAYER_LIST_H
+        self.draw_rounded_panel(
+            self.screen, panel_x, panel_y, panel_w, panel_h,
+            radius=8, border_width=1,
+        )
+        # Мелкий шрифт и верхняя строка: иначе заголовок налезает на имя
+        # первого участника (имена начинаются с panel_y + 15).
+        title = self.font_micro.render("Участники матча", True, (200, 200, 200))
+        self.screen.blit(title, (panel_x + 6, panel_y + 2))
+
+        item_w = (panel_w - (n - 1) * PLAYER_LIST_PAD) // n
+        mx, my = pygame.mouse.get_pos()
+        self.player_list_rects = []
+
+        for i, p in enumerate(participants):
+            ix = panel_x + i * (item_w + PLAYER_LIST_PAD)
+            rect = pygame.Rect(ix + 4, panel_y + 13, item_w - 8, PLAYER_LIST_ITEM_H)
+            hovered = rect.collidepoint(mx, my)
+            self.player_list_rects.append((rect, p))
+            dead = p["dead"]
+            if self._is_viewing(p):
+                name_color = (100, 255, 100)
+            elif hovered and not dead:
+                name_color = (255, 255, 100)
+            elif dead:
+                name_color = COLOR_DEAD_TEXT
+            else:
+                name_color = (255, 255, 255)
+
+            # Строка 1: имя (слева) и уровень (справа)
+            name_text = self.fit_text(p["name"], item_w - 70, self.font_micro)
+            name_surf = self.font_micro.render(name_text, True, name_color)
+            self.screen.blit(name_surf, (rect.x + 2, rect.y + 2))
+            lvl_surf = self.font_micro.render(f"Lvl {p['level']}", True, name_color)
+            self.screen.blit(lvl_surf, (rect.right - lvl_surf.get_width() - 2, rect.y + 2))
+
+            # Строка 2: полоска HP + значение HP + золото игрока
+            hp_x = rect.x + 2
+            hp_y = rect.y + 12
+            hp_pct = p["hp"] / p["max_hp"] if p["max_hp"] else 0.0
+            hp_color = self._hp_color(p["hp"], p["max_hp"]) if not dead else COLOR_DEAD_TEXT
+            pygame.draw.rect(self.screen, COLOR_HP_BG, (hp_x, hp_y, HP_BAR_W, HP_BAR_H))
+            fill_w = max(0, int((HP_BAR_W - 2) * hp_pct))
+            if fill_w > 0:
+                pygame.draw.rect(self.screen, hp_color, (hp_x + 1, hp_y + 1, fill_w - 2, HP_BAR_H - 2))
+            pygame.draw.rect(self.screen, COLOR_HP_BORDER, (hp_x, hp_y, HP_BAR_W, HP_BAR_H), width=1)
+            hp_text = self.font_micro.render(f"{int(p['hp'])}/{p['max_hp']}", True, (200, 200, 200))
+            self.screen.blit(hp_text, (hp_x + HP_BAR_W + 5, hp_y - 1))
+
+            if p["kind"] == "player" and not dead:
+                gold_text = self.font_micro.render(f"${p['gold']}", True, COLOR_PLAYER_GOLD)
+                self.screen.blit(gold_text, (rect.right - gold_text.get_width() - 2, hp_y - 1))
+            elif dead:
+                dead_text = self.font_micro.render("выбыл", True, COLOR_DEAD_TEXT)
+                self.screen.blit(dead_text, (rect.right - dead_text.get_width() - 2, hp_y - 1))
+
+    # ── Отрисовка: окно просмотра доски участника ─────────────────────────
+
+    def draw_board_view(self, participant):
+        """Модальное окно с доской участника ( юниты, звёзды, тир, уровень )."""
+        panel_w = 560
+        panel_h = 360
+        panel_x = (self.width - panel_w) // 2
+        panel_y = (self.height - panel_h) // 2
+        self.board_view_rect = pygame.Rect(panel_x, panel_y, panel_w, panel_h)
+
+        overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 210))
+        self.screen.blit(overlay, (0, 0))
+
+        self.draw_rounded_panel(
+            self.screen, panel_x, panel_y, panel_w, panel_h,
+            radius=12, border_width=2, border_color=COLOR_PANEL_BORDER_GOLD,
+        )
+        title = "Ваша доска" if participant["kind"] == "player" else f"Доска: {participant['name']}"
+        title_surf = self.font_large.render(title, True, (255, 215, 0))
+        self.screen.blit(title_surf, title_surf.get_rect(center=((panel_x + panel_w) // 2, panel_y + 26)))
+
+        dead = participant["dead"]
+        stats_y = panel_y + 62
+        lvl_surf = self.font_small.render(
+            f"Уровень: {participant['level']}   "
+            f"Юнитов на доске: {len(participant['board_units'])}   "
+            f"Скамейка: {participant['bench_count']}",
+            True, (220, 220, 220))
+        self.screen.blit(lvl_surf, (panel_x + 22, stats_y))
+        status_color = COLOR_DEAD_TEXT if dead else COLOR_HP_GREEN
+        status_surf = self.font_small.render("ВЫБЫВШИЙ" if dead else "ЖИВ", True, status_color)
+        self.screen.blit(status_surf, (panel_x + 22, stats_y + 26))
+
+        units = participant["board_units"]
+        grid_x = panel_x + 22
+        grid_y = stats_y + 70
+        cell = 62
+        cols = 7
+        for idx, u in enumerate(units):
+            cx = grid_x + (idx % cols) * (cell + 8)
+            cy = grid_y + (idx // cols) * (cell + 8)
+            pygame.draw.rect(self.screen, COLOR_CELL_EMPTY, (cx, cy, cell, cell), border_radius=4)
+            pygame.draw.rect(self.screen, COLOR_CELL_EMPTY_BORDER, (cx, cy, cell, cell), width=1, border_radius=4)
+            tier = self.tier_color(u["name"])
+            sprite_size = int(cell * 0.72)
+            sx = cx + (cell - sprite_size) // 2
+            sy = cy + 5
+            draw_unit_sprite(
+                self.screen, sx, sy, sprite_size, sprite_size,
+                u["cls"], unit_key=u["key"], star=u["star"],
+                tier_color=tier, race=u.get("race", "human"),
+            )
+            name_surf = self.font_micro.render(
+                self.fit_text(u["name"], cell - 6, self.font_micro), True, (220, 220, 220))
+            self.screen.blit(name_surf, (cx + 3, cy + cell - 14))
+        if not units:
+            empty = self.font_small.render("Доска пуста", True, COLOR_TEXT_MUTED)
+            self.screen.blit(empty, (grid_x, grid_y))
+
+        # Кнопка закрыть
+        btn_w = 130
+        btn_h = 34
+        btn_x = panel_x + panel_w - btn_w - 22
+        btn_y = panel_y + panel_h - btn_h - 22
+        mx, my = pygame.mouse.get_pos()
+        hover = btn_x <= mx <= btn_x + btn_w and btn_y <= my <= btn_y + btn_h
+        self.board_close_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+        btn_color = (60, 160, 40) if not hover else (80, 200, 60)
+        pygame.draw.rect(self.screen, btn_color, (btn_x, btn_y, btn_w, btn_h), border_radius=6)
+        pygame.draw.rect(self.screen, (255, 215, 0), (btn_x, btn_y, btn_w, btn_h), width=2, border_radius=6)
+        btn_text = self.font_small.render("Закрыть", True, (255, 255, 255))
+        self.screen.blit(btn_text, btn_text.get_rect(center=(btn_x + btn_w // 2, btn_y + btn_h // 2)))
+        esc = self.font_tiny.render("Esc или клик вне окна — закрыть", True, COLOR_TEXT_MUTED)
+        self.screen.blit(esc, (panel_x + 22, panel_y + panel_h - 34))
+
+    # ── Отрисовка: сводная таблица (лидерборд) ────────────────────────────
+
+    def draw_leaderboard(self, participants):
+        """Полноэкранная сводная таблица, отсортированная по убыванию HP."""
+        overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 225))
+        self.screen.blit(overlay, (0, 0))
+
+        panel_w = 940
+        panel_h = 580
+        panel_x = (self.width - panel_w) // 2
+        panel_y = (self.height - panel_h) // 2
+        self.draw_rounded_panel(
+            self.screen, panel_x, panel_y, panel_w, panel_h,
+            radius=14, border_width=3, border_color=COLOR_PANEL_BORDER_GOLD,
+        )
+        title = self.font_large.render("СВОДНАЯ ТАБЛИЦА УЧАСТНИКОВ", True, (255, 215, 0))
+        self.screen.blit(title, title.get_rect(center=((panel_x + panel_w) // 2, panel_y + 30)))
+
+        ranked = sorted(participants, key=lambda p: p["hp"], reverse=True)
+        cols = [
+            ("Место", 52),
+            ("Имя", 160),
+            ("HP", 72),
+            ("Уровень", 64),
+            ("Юниты", 62),
+            ("2★", 42),
+            ("3★", 42),
+            ("Золото", 62),
+            ("Статус", 76),
+        ]
+        total_w = sum(w for _, w in cols)
+        start_x = panel_x + (panel_w - total_w) // 2
+        header_y = panel_y + 86
+        row_h = 34
+        x = start_x
+        for label, w in cols:
+            surf = self.font_small.render(label, True, (190, 210, 240))
+            self.screen.blit(surf, (x + 8, header_y + 7))
+            x += w
+        pygame.draw.line(self.screen, (80, 100, 130), (start_x, header_y + row_h),
+                         (start_x + total_w, header_y + row_h), 1)
+
+        y = header_y + row_h + 10
+        for place, p in enumerate(ranked, start=1):
+            if y + row_h > panel_y + panel_h - 70:
+                break
+            x = start_x
+            place_color = (255, 215, 0) if place == 1 else (200, 200, 200)
+            surf = self.font_small.render(str(place), True, place_color)
+            self.screen.blit(surf, (x + 8, y + 9))
+            x += 52
+            dead = p["dead"]
+            name_color = COLOR_DEAD_TEXT if dead else (255, 255, 255)
+            surf = self.font_small.render(self.fit_text(p["name"], 150, self.font_small), True, name_color)
+            self.screen.blit(surf, (x + 8, y + 9))
+            x += 160
+            hp_color = self._hp_color(p["hp"], p["max_hp"]) if not dead else COLOR_DEAD_TEXT
+            surf = self.font_small.render(f"{p['hp']}/{p['max_hp']}", True, hp_color)
+            self.screen.blit(surf, (x + 8, y + 9))
+            x += 72
+            surf = self.font_small.render(str(p["level"]), True, (220, 220, 220))
+            self.screen.blit(surf, (x + 8, y + 9))
+            x += 64
+            star2 = sum(1 for u in p["board_units"] if u["star"] == 2)
+            star3 = sum(1 for u in p["board_units"] if u["star"] == 3)
+            surf = self.font_small.render(str(len(p["board_units"])), True, (220, 220, 220))
+            self.screen.blit(surf, (x + 8, y + 9))
+            x += 62
+            surf = self.font_small.render(str(star2), True, (200, 220, 100) if star2 else (100, 100, 100))
+            self.screen.blit(surf, (x + 8, y + 9))
+            x += 42
+            surf = self.font_small.render(str(star3), True, (255, 215, 0) if star3 else (100, 100, 100))
+            self.screen.blit(surf, (x + 8, y + 9))
+            x += 42
+            if p["kind"] == "player":
+                surf = self.font_small.render(f"${p['gold']}", True, COLOR_PLAYER_GOLD)
+            else:
+                surf = self.font_small.render("—", True, COLOR_TEXT_MUTED)
+            self.screen.blit(surf, (x + 8, y + 9))
+            x += 62
+            status = "ВЫБЫЛ" if dead else "ЖИВ"
+            surf = self.font_small.render(status, True, COLOR_DEAD_TEXT if dead else COLOR_HP_GREEN)
+            self.screen.blit(surf, (x + 8, y + 9))
+            y += row_h
+
+        hint = self.font_tiny.render(
+            "Обновляется после каждого раунда  |  Tab — открыть/закрыть  |  Esc — закрыть",
+            True, COLOR_TEXT_MUTED)
+        self.screen.blit(hint, hint.get_rect(center=((panel_x + panel_w) // 2, panel_y + panel_h - 32)))
+
     def draw_controls(self):
         """Draw control hints at bottom."""
-        text = "SPACE=Pause  +/-=Speed  ESC=Quit"
+        text = "SPACE=Pause  +/-=Speed  ESC=Quit  |  Tab — таблица участников  |  Клик по участнику — доска"
         surf = self.font_tiny.render(text, True, (150, 150, 150))
-        self.screen.blit(surf, (self.width // 2 - 200, self.height - 16))
+        self.screen.blit(surf, (self.width // 2 - 330, self.height - 16))
 
     def draw_round_progress(self, completed_count, total):
         """Draw round progress dots at bottom."""
@@ -913,97 +1308,6 @@ class GameUI:
         r = surf.get_rect(center=(self.width // 2, self.height // 2))
         self.screen.blit(surf, r)
 
-    def draw_draft_phase(self, player, shop_items: list[dict], gold: int, 
-                         round_num: int, is_creep: bool, synergy_data: dict):
-        """Draw draft phase UI with shop items, bench, and board."""
-        self.screen.fill((20, 30, 40))
-
-        # Header
-        status = "CREEP" if is_creep else "PvP"
-        header = f"ROUND {round_num} - DRAFT [{status}]"
-        surf = self.font_large.render(header, True, (255, 255, 100))
-        r = surf.get_rect(center=(self.width // 2, 40))
-        self.screen.blit(surf, r)
-
-        # Gold display
-        gold_surf = self.font_small.render(f"Gold: {gold}", True, (255, 215, 0))
-        self.screen.blit(gold_surf, (self.width - 150, 8))
-
-        # Draw shop items (top section)
-        pygame.draw.rect(self.screen, (40, 60, 80), (10, 70, self.width - 20, 120), border_radius=8)
-        shop_title = self.font_small.render("SHOP (N=Next roll)", True, (200, 200, 200))
-        self.screen.blit(shop_title, (20, 80))
-
-        item_x = 20
-        for i, item in enumerate(shop_items[:10]):
-            if item is None:
-                continue
-            x = item_x + i * 110
-            if x > self.width - 120:
-                break
-            # Item card
-            color = (60, 80, 100)
-            name = item.get("name", "?")
-            cost = item.get("cost", 1)
-
-            # Background
-            pygame.draw.rect(self.screen, color, (x, 100, 100, 85), border_radius=6)
-            pygame.draw.rect(self.screen, (100, 150, 200), (x, 100, 100, 85), width=1, border_radius=6)
-
-            # Name
-            name_surf = self.font_tiny.render(name, True, (255, 255, 255))
-            self.screen.blit(name_surf, (x + 5, 105))
-
-            # Cost
-            cost_surf = self.font_tiny.render(f"${cost}", True, (255, 215, 0))
-            self.screen.blit(cost_surf, (x + 5, 125))
-
-        # Draw bench (left section)
-        pygame.draw.rect(self.screen, (30, 50, 70), (10, 200, self.width // 3 - 20, 200), border_radius=8)
-        bench_title = self.font_small.render("BENCH (Click to place)", True, (200, 200, 200))
-        self.screen.blit(bench_title, (20, 210))
-
-        bench_y = 240
-        for i, unit_name in enumerate(player.reserve[:10]):
-            x = 20 + (i % 5) * ((self.width // 3 - 40) // 5)
-            y = bench_y + (i // 5) * 35
-            color = (80, 100, 120) if "★" not in unit_name else (120, 80, 160)
-            pygame.draw.rect(self.screen, color, (x, y, 90, 28), border_radius=4)
-            name_surf = self.font_tiny.render(unit_name, True, (255, 255, 255))
-            self.screen.blit(name_surf, (x + 5, y + 5))
-
-        # Draw board (right section)
-        pygame.draw.rect(self.screen, (40, 70, 40), (self.width // 3 + 10, 200, self.width // 3 - 20, 200), border_radius=8)
-        board_title = self.font_small.render("BOARD (Click to remove)", True, (200, 200, 200))
-        self.screen.blit(board_title, (self.width // 3 + 20, 210))
-
-        for i, unit in enumerate(player.board[:6]):
-            x = self.width // 3 + 20 + (i % 3) * ((self.width // 3 - 40) // 3)
-            y = 250 + (i // 3) * 40
-            color = (100, 160, 100) if unit.get("star", 1) == 1 else (160, 100, 160)
-            pygame.draw.rect(self.screen, color, (x, y, 90, 32), border_radius=4)
-            name_surf = self.font_tiny.render(unit.get("name", "?"), True, (255, 255, 255))
-            self.screen.blit(name_surf, (x + 5, y + 5))
-
-        # Synergy info (показываем только если количество >= порога активации 2)
-        def synergy_counts(cls):
-            try:
-                return player.get_synergy_count(cls, self.all_units)
-            except TypeError:
-                return player.get_synergy_count(cls)
-        syn_x = self.width // 3 * 2 + 10
-        for cls_name in ["warrior", "mage", "archer"]:
-            count = synergy_counts(cls_name)
-            if count >= 2:  # не выводим, если меньше порога активации
-                color = (100, 255, 100) if count >= 2 else (200, 200, 100)
-                syn_text = self.font_tiny.render(f"{cls_name}: {count}", True, color)
-                self.screen.blit(syn_text, (syn_x, 230 + list(["warrior", "mage", "archer"]).index(cls_name)) * 25)
-
-        # Controls hint
-        controls = "W=Buy(1) S=Sell D=Place F=Remove R=Roll"
-        ctrl_surf = self.font_tiny.render(controls, True, (150, 150, 150))
-        self.screen.blit(ctrl_surf, (self.width // 2 - 200, self.height - 40))
-
     def _draw_interactive_draft(self, player, shop_items: list[dict], gold: int,
                                  round_num: int, is_creep: bool, synergy_data: dict,
                                  race_synergy_data: dict | None = None, shop=None):
@@ -1022,9 +1326,12 @@ class GameUI:
         status = "CREEP" if is_creep else "PvP"
         header = f"ROUND {round_num} [{status}]"
         header_surf = self.font_small.render(header, True, (255, 215, 0))
-        self.screen.blit(header_surf, (hud_x + 10, hud_y + 6))
         gold_surf = self.font_small.render(f"Золото: {gold}", True, (255, 215, 0))
-        self.screen.blit(gold_surf, (hud_x + 10, hud_y + 18))
+        # Одна строка: раунд слева, золото справа — иначе две строки не влезают
+        # в плашку высотой 34 и налезают друг на друга / выходят за рамку.
+        text_y = hud_y + (hud_h - header_surf.get_height()) // 2
+        self.screen.blit(header_surf, (hud_x + 10, text_y))
+        self.screen.blit(gold_surf, (hud_x + hud_w - 10 - gold_surf.get_width(), text_y))
 
         # ── SHOP section: динамическая ширина карточек под экран ──
         mx, my = pygame.mouse.get_pos()
@@ -1038,7 +1345,9 @@ class GameUI:
             (available_shop_width - (SHOP_CARD_COUNT - 1) * SHOP_CARD_MARGIN)
             // SHOP_CARD_COUNT,
         )
-        shop_card_h = int(shop_card_w * SHOP_CARD_ASPECT)
+        # Высота ограничена сверху: ниже SHOP_Y0 + card_h начинается бенч/поле
+        # (BENCH_Y0), иначе на широких экранах карточки налезают на нижнюю секцию.
+        shop_card_h = min(int(shop_card_w * SHOP_CARD_ASPECT), BENCH_Y0 - SHOP_Y0 - 12)
         shop_step = shop_card_w + SHOP_CARD_MARGIN
         item_x = SCREEN_MARGIN
         slot_color = (60, 80, 100)
@@ -1048,7 +1357,7 @@ class GameUI:
         right_panel_x = self.width - 130
         right_panel_y = shop_y
         right_panel_w = 115
-        right_panel_h = shop_card_h
+        right_panel_h = max(shop_card_h, 170)
         self.draw_textured_rect(self.screen, right_panel_x, right_panel_y,
                                 right_panel_w, right_panel_h, texture_name="panel")
         pygame.draw.rect(self.screen, COLOR_PANEL_BORDER,
@@ -1093,15 +1402,15 @@ class GameUI:
 
         # Уровень игрока — над кнопками (аккуратно, не перекрывая текст)
         if player is not None:
-            player_lvl_rect = pygame.Rect(right_panel_x + 10, right_panel_y + 72, right_panel_w - 20, 30)
+            player_lvl_rect = pygame.Rect(right_panel_x + 10, right_panel_y + 72, right_panel_w - 20, 32)
             hover_pl = player_lvl_rect.collidepoint(mx, my)
             pl_color = (100, 220, 100) if player.xp >= player.xp_to_next_level else (200, 200, 200)
             pygame.draw.rect(self.screen, (60, 80, 100), player_lvl_rect, border_radius=4)
             pygame.draw.rect(self.screen, COLOR_PANEL_BORDER, player_lvl_rect, width=1, border_radius=4)
             pl_surf = self.font_tiny.render(f"Lvl {player.level}", True, pl_color)
-            self.screen.blit(pl_surf, pl_surf.get_rect(center=(player_lvl_rect.centerx, player_lvl_rect.y + 10)))
+            self.screen.blit(pl_surf, pl_surf.get_rect(center=(player_lvl_rect.centerx, player_lvl_rect.y + 9)))
             xp_surf = self.font_tiny.render(f"{player.xp}/{player.xp_to_next_level}", True, pl_color)
-            self.screen.blit(xp_surf, xp_surf.get_rect(center=(player_lvl_rect.centerx, player_lvl_rect.y + 20)))
+            self.screen.blit(xp_surf, xp_surf.get_rect(center=(player_lvl_rect.centerx, player_lvl_rect.y + 23)))
 
         # Уровень магазина привязан к уровню игрока.
         if shop is not None:
@@ -1134,7 +1443,8 @@ class GameUI:
         # Иконка уровня магазина — круг с цифрой (под кнопками)
         icon_r = 14
         icon_cx = right_panel_x + right_panel_w // 2
-        icon_cy = right_panel_y + 110
+        # Ниже блока Lvl/опыт (тот занимает +72..+104), иначе круг налезает на него.
+        icon_cy = right_panel_y + 122
         self.lvl_icon_rect = pygame.Rect(icon_cx - icon_r, icon_cy - icon_r,
                                          icon_r * 2, icon_r * 2)
         hover_lvl = self.lvl_icon_rect.collidepoint(mx, my)
@@ -1145,9 +1455,9 @@ class GameUI:
 
         # Текст уровня под иконкой
         lvl_text = self.font_tiny.render(f"Shop {lvl}", True, lvl_color)
-        self.screen.blit(lvl_text, lvl_text.get_rect(center=(icon_cx, icon_cy + 18)))
+        self.screen.blit(lvl_text, lvl_text.get_rect(center=(icon_cx, icon_cy + 24)))
         up_surf = self.font_tiny.render(up_text, True, (200, 200, 100))
-        self.screen.blit(up_surf, up_surf.get_rect(center=(icon_cx, icon_cy + 32)))
+        self.screen.blit(up_surf, up_surf.get_rect(center=(icon_cx, icon_cy + 38)))
 
         if hover_lvl:
             tip = f"Уровень магазина {lvl}\nШанс юнита: {unit_chance_pct}%\n"
@@ -1204,9 +1514,11 @@ class GameUI:
             )
 
             # Силуэт юнита в центре карточки (занимает ~70-80% от размера карточки)
-            sprite_size = int(shop_card_w * SPRITE_FILL_RATIO)
+            # Спрайт от меньшей стороны и по центру: при ограниченной высоте
+            # карточки иначе силуэт вылезает за верх/низ карточки.
+            sprite_size = int(min(shop_card_w, shop_card_h) * SPRITE_FILL_RATIO)
             sprite_x = x + shop_card_w // 2 - sprite_size // 2
-            sprite_y = shop_y + shop_card_h // 3 - sprite_size // 2
+            sprite_y = shop_y + (shop_card_h - sprite_size) // 2 - 14
             if name_key.startswith("ITEM:"):
                 draw_item_icon(self.screen, x + shop_card_w // 2, shop_y + int(shop_card_h * 0.45),
                                sprite_size, item.get("type", "accessory"))
@@ -1230,10 +1542,12 @@ class GameUI:
         bench_panel_w = self.width // 3 - 40
         bench_cell_w = max(
             50,
-            (bench_panel_w - (BENCH_COLS - 1) * BENCH_CELL_MARGIN) // BENCH_COLS,
+            (bench_panel_w - 2 * BENCH_SIDE_PAD - (BENCH_COLS - 1) * BENCH_CELL_MARGIN) // BENCH_COLS,
         )
         bench_cell_h = bench_cell_w  # квадратные ячейки
-        bench_panel_h = BENCH_Y0 + BENCH_ROWS * bench_cell_h + BENCH_CELL_MARGIN * 2 + 40
+        # Высота = только контент (заголовок + сетка + отступы), БЕЗ BENCH_Y0:
+        # раньше Y0 прибавлялся к высоте и рамка уходила далеко за низ экрана.
+        bench_panel_h = 40 + BENCH_ROWS * bench_cell_h + (BENCH_ROWS - 1) * BENCH_CELL_MARGIN + 10
         self.draw_textured_rect(self.screen, 10, BENCH_Y0,
                                 bench_panel_w, bench_panel_h, texture_name="panel")
         # Только рамка поверх текстуры (заливка уже текстура)
@@ -1264,10 +1578,11 @@ class GameUI:
             x = BENCH_X0 + col * (bench_cell_w + BENCH_CELL_MARGIN)
             y = BENCH_Y0 + 30 + row * (bench_cell_h + BENCH_CELL_MARGIN)
             # Переводим английский ключ на русское имя
-            base = unit_name.split("★")[0]
+            base = base_name(unit_name)
             ru_name = self.all_units.get(base, {}).get("name", base)
             # Звёздность — через '*', иначе глиф '★' рисуется заглушкой
-            display_name = ru_name + self.star_suffix(unit_name)
+            suffix = self.star_suffix(unit_name)
+            display_name = ru_name + (" " + suffix if suffix else "")
             # Подсветка выбранного bench slot — через цвет названия, а не рамку
             cell_rect = pygame.Rect(x, y, bench_cell_w, bench_cell_h)
             pygame.draw.rect(self.screen, slot_color, cell_rect, border_radius=4)
@@ -1279,7 +1594,7 @@ class GameUI:
             draw_unit_sprite(
                 self.screen, sprite_x, sprite_y, sprite_size, sprite_size,
                 ud.get("class", "warrior"), unit_key=base,
-                star=int(unit_name.split("★")[1]) if "★" in unit_name else 1,
+                star=star_level(unit_name),
                 race=ud.get("race", "human"),
             )
             # Названиеベンч цветом по редкости
@@ -1290,6 +1605,23 @@ class GameUI:
                 self.fit_text(display_name, bench_cell_w - 8, self.font_micro),
                 True, name_color)
             self.screen.blit(name_surf, (x + 4, y + bench_cell_h - 16))
+
+        # ── Корзина для продажи под панелью бенча (слева внизу) ──
+        sell_rect = self._sell_bin_rect()
+        if sell_rect.h >= 32:
+            hover_sell = sell_rect.collidepoint(mx, my)
+            bin_color = (120, 60, 60) if not hover_sell else (180, 80, 80)
+            pygame.draw.rect(self.screen, bin_color, sell_rect, border_radius=6)
+            pygame.draw.rect(
+                self.screen, (255, 255, 255), sell_rect, width=2, border_radius=6
+            )
+            sell_text = self.font_tiny.render(
+                "Продать — перетащи юнита сюда", True, (255, 255, 255)
+            )
+            self.screen.blit(
+                sell_text,
+                sell_text.get_rect(center=sell_rect.center),
+            )
 
         # ── BOARD section — тактическое поле 5×5 ──
         field_x0 = self.width // 3 + 10
@@ -1303,7 +1635,9 @@ class GameUI:
         )
         board_cell_h = board_cell_w  # квадратные ячейки
         field_w = BOARD_COLS * board_cell_w + (BOARD_COLS - 1) * BOARD_CELL_MARGIN
-        field_h = BOARD_ROWS * board_cell_h + (BOARD_ROWS - 1) * BOARD_CELL_MARGIN + 40
+        # +60 (а не +40): запас под подсказку снизу, иначе она перекрывает
+        # последний ряд клеток поля.
+        field_h = BOARD_ROWS * board_cell_h + (BOARD_ROWS - 1) * BOARD_CELL_MARGIN + 60
 
         pygame.draw.rect(self.screen, (40, 70, 40),
                          (field_x0, field_y0, field_w, field_h), border_radius=8)
@@ -1349,9 +1683,10 @@ class GameUI:
                         race=ud.get("race", "human"),
                     )
                     # Название на поле цветом по редкости
-                    base = unit["name"].split("★")[0]
+                    base = base_name(unit["name"])
                     ru_name = self.all_units.get(base, {}).get("name", base)
-                    display_name = ru_name + self.star_suffix(unit["name"])
+                    suffix = self.star_suffix(unit["name"])
+                    display_name = ru_name + (" " + suffix if suffix else "")
                     name_color = self.tier_color(display_name)
                     if (r, c) == self.selected_field_cell:
                         name_color = (255, 255, 100)
@@ -1374,7 +1709,7 @@ class GameUI:
         if self.drag_bench_idx is not None and self.drag_bench_idx < len(player.reserve):
             mx, my = pygame.mouse.get_pos()
             unit_name = player.reserve[self.drag_bench_idx]
-            base = unit_name.split("★")[0]
+            base = base_name(unit_name)
             ud = self.all_units.get(base, {})
             sprite_size = int(BENCH_CELL_SIZE * SPRITE_FILL_RATIO)
             draw_unit_sprite(
@@ -1382,7 +1717,7 @@ class GameUI:
                 sprite_size, sprite_size,
                 ud.get("class", "warrior"), unit_key=base,
                 tier_color=self.tier_color(unit_name),
-                star=int(unit_name.split("★")[1]) if "★" in unit_name else 1,
+                star=star_level(unit_name),
                 race=ud.get("race", "human"),
             )
 
@@ -1390,7 +1725,7 @@ class GameUI:
         if self.drag_board_idx is not None and self.drag_board_data is not None:
             mx, my = pygame.mouse.get_pos()
             unit_name = self.drag_board_data.get("name", "?")
-            base = unit_name.split("★")[0]
+            base = base_name(unit_name)
             ud = self.all_units.get(base, {})
             sprite_size = int(BOARD_CELL_SIZE * SPRITE_FILL_RATIO)
             draw_unit_sprite(
@@ -1398,7 +1733,7 @@ class GameUI:
                 sprite_size, sprite_size,
                 ud.get("class", "warrior"), unit_key=base,
                 tier_color=self.tier_color(unit_name),
-                star=int(unit_name.split("★")[1]) if "★" in unit_name else 1,
+                star=star_level(unit_name),
                 race=ud.get("race", "human"),
             )
 
@@ -1422,10 +1757,15 @@ class GameUI:
             if count >= 2:
                 syn_entries.append((race_name, count))
 
+        syn_hover_name = None  # имя записи синергии под курсором
         for idx, (name, count) in enumerate(syn_entries):
             syn_color = (100, 255, 100) if count >= 2 else (200, 200, 100)
             syn_text = self.font_tiny.render(f"{name}: {count}", True, syn_color)
-            self.screen.blit(syn_text, (syn_x, BOARD_Y0 + 21 + idx * 20))
+            syn_rect = syn_text.get_rect(topleft=(syn_x, BOARD_Y0 + 21 + idx * 20))
+            syn_rect = syn_rect.inflate(6, 4)
+            self.screen.blit(syn_text, syn_rect)
+            if syn_rect.collidepoint(mx, my):
+                syn_hover_name = name
 
         # ── Inventory ───────────────────────────────────────────────────
         # Раньше метод _draw_items_section() не вызывался нигде, поэтому
@@ -1459,6 +1799,15 @@ class GameUI:
         ctrl_surf = self.font_tiny.render(controls, True, (150, 150, 150))
         self.screen.blit(ctrl_surf, (self.width // 2 - 310, self.height - 30))
 
+        # Сообщение об ошибке магазина (ShopError): показываем ~2 секунды
+        if self.draft_message is not None:
+            msg_text, t0 = self.draft_message
+            if pygame.time.get_ticks() - t0 < 2000:
+                msg_surf = self.font_tiny.render(msg_text, True, (255, 80, 80))
+                self.screen.blit(msg_surf, (SCREEN_MARGIN, self.height - 55))
+            else:
+                self.draft_message = None
+
         # Tooltip магазина рисуем ВСЕМИ остальными элементами, чтобы не
         # перекрывался фоном скамейки, полем и другими панелями.
         if shop_hover_tooltip is not None:
@@ -1490,18 +1839,190 @@ class GameUI:
                     lines.append(unit_desc)
                 passive = ud.get("passive")
                 if passive:
-                    lines.append(
-                        f"Пассивка: {passive.get('name', '')} — {passive.get('desc', '')}"
-                    )
+                    eff = passive.get("effect", {})
+                    # Единый формат: +N% тип за союзника (берем из effect, а не из desc,
+                    # чтобы не было дублей типа "+10% урона ... урон").
+                    name = passive.get("name", "")
+                    if "hp_bonus_pct_per_ally" in eff:
+                        lines.append(
+                            f"Пассивка: {name} — +{eff['hp_bonus_pct_per_ally']}% HP за союзника"
+                        )
+                    elif "damage_bonus_pct_per_ally" in eff:
+                        lines.append(
+                            f"Пассивка: {name} — +{eff['damage_bonus_pct_per_ally']}% урона за союзника"
+                        )
+                    elif "speed_bonus_pct_per_ally" in eff:
+                        lines.append(
+                            f"Пассивка: {name} — +{eff['speed_bonus_pct_per_ally']}% скорости за союзника"
+                        )
+                    elif "damage_reduction_pct_per_ally" in eff:
+                        lines.append(
+                            f"Пассивка: {name} — +{eff['damage_reduction_pct_per_ally']}% защиты за союзника"
+                        )
+                    else:
+                        desc = passive.get("desc", "")
+                        lines.append(f"Пассивка: {name} — {desc}")
                 active = ud.get("active")
                 if active:
                     cd = active.get("cooldown")
-                    cd_text = f" (к/д {cd} тиков)" if cd else ""
+                    cd_text = f" (к/д {cd} сек)" if cd else ""
+                    # Описание эффекта способности из effect
+                    eff = active.get("effect", {})
+                    eff_parts = []
+                    if "damage" in eff:
+                        eff_parts.append(f"урон {eff['damage']}")
+                    if "shield" in eff:
+                        eff_parts.append(f"щит {eff['shield']}")
+                    if "heal" in eff:
+                        eff_parts.append(f"исцеление {eff['heal']}")
+                    if "damage_per_tick" in eff:
+                        eff_parts.append(f"{eff['damage_per_tick']} урона/тик")
+                    if "heal_per_tick" in eff:
+                        eff_parts.append(f"{eff['heal_per_tick']} лечения/тик")
+                    if "bonus_damage" in eff and eff["bonus_damage"] > 0:
+                        eff_parts.append(f"+{eff['bonus_damage']} урона")
+                    if "bonus_damage_per_ally" in eff:
+                        eff_parts.append(f"+{eff['bonus_damage_per_ally']}% урона/союзник")
+                    if "damage_bonus_pct" in eff:
+                        eff_parts.append(f"+{eff['damage_bonus_pct']}% урона")
+                    if "damage_reduction_pct" in eff:
+                        eff_parts.append(f"-{eff['damage_reduction_pct']}% урона")
+                    if "attack_speed_pct" in eff:
+                        eff_parts.append(f"+{eff['attack_speed_pct']}% скорости")
+                    if eff.get("targets") == "all_allies":
+                        eff_parts.append("всем союзникам")
+                    elif eff.get("targets") == "lowest_ally":
+                        eff_parts.append("самому слабому союзнику")
+                    if eff.get("radius"):
+                        eff_parts.append(f"радиус {eff['radius']}")
+                    eff_text = f": {', '.join(eff_parts)}" if eff_parts else ""
                     lines.append(
-                        f"Активка: {active.get('name', '')} — {active.get('desc', '')}{cd_text}"
+                        f"Активка: {active.get('name', '')}{eff_text}{cd_text}"
                     )
                 tooltip = "\n".join(lines)
             draw_tooltip(self.screen, x, shop_y + shop_card_h + 18, tooltip, self.font_tiny)
+
+        # Tooltip синергии — рисуется поверх всего, если курсор на записи
+        if syn_hover_name is not None:
+            syn_info = self._synergy_info_for(
+                syn_hover_name, synergy_data, race_synergy_data
+            )
+            if syn_info is not None:
+                count = player.get_synergy_count(syn_hover_name, self.all_units)
+                if count == 0:
+                    count = player.get_race_count(syn_hover_name, self.all_units)
+                tooltip = self._format_synergy_tooltip(
+                    syn_hover_name, count, syn_info, self.all_units
+                )
+                draw_tooltip(
+                    self.screen,
+                    syn_x - 280,
+                    BOARD_Y0 + 21,
+                    tooltip,
+                    self.font_tiny,
+                )
+
+    def _synergy_info_for(
+        self,
+        name: str,
+        synergy_data: dict,
+        race_synergy_data: dict | None,
+    ) -> dict | None:
+        """Вернуть полную запись синергии (пороги + бонусы) по имени."""
+        syn_info = synergy_data.get(name)
+        if syn_info:
+            return syn_info
+        if race_synergy_data:
+            return race_synergy_data.get(name)
+        return None
+
+    def _format_synergy_bonus(self, bonus: dict) -> str:
+        """Единый форматтер бонусов синергии: ключ -> человекочитаемая строка."""
+        parts: list[str] = []
+        if "hp_bonus_pct" in bonus:
+            parts.append(f"+{bonus['hp_bonus_pct']}% HP")
+        if "damage_bonus_pct" in bonus:
+            parts.append(f"+{bonus['damage_bonus_pct']}% урона")
+        if "attack_speed_pct" in bonus:
+            parts.append(f"+{bonus['attack_speed_pct']}% скорости атаки")
+        if "crit_chance_bonus" in bonus:
+            parts.append(f"+{bonus['crit_chance_bonus']}% шанс крита")
+        if "mana_per_kill" in bonus:
+            parts.append(f"к/д −{bonus['mana_per_kill']} сек за убийство")
+        if "evasion_pct" in bonus:
+            parts.append(f"уклонение {bonus['evasion_pct']}%")
+        if "lifesteal_pct" in bonus:
+            parts.append(f"вампиризм {bonus['lifesteal_pct']}%")
+        if "damage_reduction_pct" in bonus:
+            parts.append(f"−{bonus['damage_reduction_pct']}% получаемого урона")
+        if "hp_regen_pct" in bonus:
+            parts.append(f"реген {bonus['hp_regen_pct']}% HP")
+        if "gold_bonus_pct" in bonus:
+            parts.append(f"+{bonus['gold_bonus_pct']}% золота")
+        if "unity_damage_pct" in bonus or "unity_hp_pct" in bonus:
+            dmg = bonus.get("unity_damage_pct", 0)
+            hp = bonus.get("unity_hp_pct", 0)
+            parts.append(f"единство: +{dmg}% урона / +{hp}% HP за уникальный класс")
+        if "berserker" in bonus:
+            b = bonus["berserker"]
+            parts.append(
+                f"берсерк: +{b['damage_pct'][-1]}% урона/скорости при HP≤{b['hp_thresholds'][0]}%"
+            )
+        if "revive" in bonus:
+            rv = bonus["revive"]
+            parts.append(f"восстание: {rv['hp_pct']}% HP, до {rv['max_revives']} раз")
+        # Неизвестные ключи — не падать
+        for key, value in bonus.items():
+            if key not in {
+                "hp_bonus_pct",
+                "damage_bonus_pct",
+                "attack_speed_pct",
+                "crit_chance_bonus",
+                "mana_per_kill",
+                "evasion_pct",
+                "lifesteal_pct",
+                "damage_reduction_pct",
+                "hp_regen_pct",
+                "gold_bonus_pct",
+                "unity_damage_pct",
+                "unity_hp_pct",
+                "berserker",
+                "revive",
+            }:
+                parts.append(f"{key}: {value}")
+        return "; ".join(parts)
+
+    def _format_synergy_tooltip(
+        self, name: str, count: int, syn_info: dict, all_units: dict
+    ) -> str:
+        """Формирует текст тултипа синергии: имя, активный порог, следующий порог."""
+        ud = all_units.get(name, {})
+        ru_name = ud.get("name", name)
+        lines: list[str] = [f"{ru_name}: {count} на доске"]
+
+        thresholds = sorted(syn_info.get("thresholds", []))
+        bonuses = syn_info.get("bonuses", {})
+
+        # Находим активный порог (максимальный ≤ count) и следующий (минимум > count)
+        active_key = None
+        next_key = None
+        for t in thresholds:
+            t_str = str(t)
+            if t <= count:
+                active_key = t_str
+            elif t > count and next_key is None:
+                next_key = t_str
+
+        if active_key and active_key in bonuses:
+            lines.append(
+                f"{active_key} (активно): {self._format_synergy_bonus(bonuses[active_key])}"
+            )
+        if next_key and next_key in bonuses:
+            lines.append(
+                f"{next_key} (следующий): {self._format_synergy_bonus(bonuses[next_key])}"
+            )
+
+        return "\n".join(lines)
 
     def _draw_items_section(self, items: list[dict]):
         """Draw inventory section with items."""
@@ -1654,7 +2175,7 @@ class GameUI:
                 # Юнит без позиции на поле — он был на скамейке, кладем туда.
                 if u.get("row") is None or u.get("col") is None:
                     player.reserve.append(name)
-                elif len(player.board) < 6:
+                elif len(player.board) < player.max_board:
                     player.board.append(unit_data)
                     # Переносим базовые статы, чтобы предметы и бонусы применялись корректно
                     idx = len(player.board) - 1
@@ -1665,18 +2186,14 @@ class GameUI:
                         u.get("damage", ud.get("damage", 10) if ud else 10),
                         u.get("attack_speed", ud.get("attack_speed", 1.0) if ud else 1.0),
                     )
-                    # Повторно применяем бонусы предметов (items сохранены, а бонусы
-                    # пересчитываем, чтобы Einheiten fights с корректными статами)
+                    # Пересчитываем бонусы предметов из сохранённых items.
+                    # Единая точка accumulate_item_bonuses кладёт ВСЕ статы
+                    # (включая speed_bonus_pct) в item_bonuses — их применит
+                    # build_combat_team. Раньше скорость писалась в attack_speed
+                    # напрямую и в бой не попадала.
                     board_unit = player.board[idx]
-                    board_unit.setdefault("item_bonuses", {})
                     for it in board_unit.get("items", []):
-                        for stat_name, stat_value in it.get("stats", {}).items():
-                            if stat_name == "speed_bonus_pct":
-                                base_speed = board_unit.get("_base_attack_speed", 1.0)
-                                board_unit["attack_speed"] = base_speed * (1 + stat_value / 100)
-                            else:
-                                current = board_unit["item_bonuses"].get(stat_name, 0)
-                                board_unit["item_bonuses"][stat_name] = current + stat_value
+                        accumulate_item_bonuses(board_unit, it.get("stats", {}))
                 else:
                     player.reserve.append(name)
 
@@ -1710,14 +2227,16 @@ class GameUI:
 
                     elif key == pygame.K_r:
                         if player.gold >= ROLL_COST:
-                            player.gold -= ROLL_COST
                             try:
                                 # роллим и юнитов, и предметы — иначе после
                                 # нажатия R из магазина пропадали предметы
-                                shop_items = self._mixed_roll(
+                                new_items = self._mixed_roll(
                                     shop, count=5, item_count=3)
                             except Exception:
-                                pass
+                                pass  # ролл не удался — золото НЕ списываем
+                            else:
+                                player.gold -= ROLL_COST
+                                shop_items = new_items
 
                     elif key == pygame.K_n:
                         try:
@@ -1740,8 +2259,8 @@ class GameUI:
                                     self.play_sound("buy")
                                     shop_items[self.selected_shop_idx] = None
                                     self.selected_shop_idx = None
-                        except Exception:
-                            pass
+                        except ShopError as e:
+                            self.draft_message = (str(e), pygame.time.get_ticks())
 
                     elif key == pygame.K_s:
                         if player.reserve:
@@ -1755,7 +2274,7 @@ class GameUI:
                                 pass
 
                     elif key == pygame.K_d:
-                        if player.reserve and len(player.board) < 6:
+                        if player.reserve and len(player.board) < player.max_board:
                             try:
                                 unit = draft_phase.place_on_board(player, len(player.reserve) - 1)
                                 # Найти первую свободную клетку на тактическом поле 5×5
@@ -1779,8 +2298,8 @@ class GameUI:
                                 if name_base in all_units:
                                     ud = all_units[name_base]
                                     shop.set_base_stats(player, len(player.board) - 1, 
-                                                       int(ud["hp"] * (1.5 if unit.get("star", 1) == 2 else 2.0 if unit.get("star", 1) == 3 else 1)),
-                                                       int(ud["damage"] * (1.5 if unit.get("star", 1) == 2 else 2.0 if unit.get("star", 1) == 3 else 1)),
+                                                       int(ud["hp"] * (star_multiplier(unit.get("star", 1)))),
+                                                       int(ud["damage"] * (star_multiplier(unit.get("star", 1)))),
                                                        ud["attack_speed"])
                             except Exception:
                                 pass
@@ -1813,11 +2332,40 @@ class GameUI:
                             except Exception:
                                 pass
 
+                    elif key == KEY_LEADERBOARD:
+                        # Tab — открыть/закрыть сводную таблицу
+                        self.leaderboard_open = not self.leaderboard_open
+                        self.viewing_board = None
+
+                    elif key == pygame.K_ESCAPE:
+                        # Esc — закрыть таблицу или просмотр доски
+                        if self.leaderboard_open:
+                            self.leaderboard_open = False
+                        elif self.viewing_board is not None:
+                            self.viewing_board = None
+
                 elif event.type == pygame.MOUSEMOTION:
                     pass  # позиция мыши берется напрямую при отрисовке
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     mx, my = event.pos
+                    # ── Панель участников: клик по участнику открывает его доску ──
+                    if self.handle_player_list_click(mx, my):
+                        self.selected_shop_idx = None
+                        self.selected_bench_idx = None
+                        break
+                    # Закрыть окно просмотра доски: клик по кнопке «Закрыть» или вне окна
+                    if self.viewing_board is not None:
+                        if getattr(self, "board_close_rect", None) and self.board_close_rect.collidepoint(mx, my):
+                            self.viewing_board = None
+                            self.selected_shop_idx = None
+                            self.selected_bench_idx = None
+                            break
+                        elif getattr(self, "board_view_rect", None) and not self.board_view_rect.collidepoint(mx, my):
+                            self.viewing_board = None
+                            self.selected_shop_idx = None
+                            self.selected_bench_idx = None
+                            break
                     # ── Кнопка реролла магазина (клик мышью) ──
                     reroll_rect = pygame.Rect(self.width - 120, 93, 95, 26)
                     if reroll_rect.collidepoint(mx, my):
@@ -1838,6 +2386,10 @@ class GameUI:
                             and shop is not None
                             and self.player is not None):
                         if self.player.buy_xp():
+                            # Уровень магазина привязан к уровню игрока: после
+                            # покупки опыта синхронизируем shop.level, иначе
+                            # ролл идёт по старым шансам до следующего раунда.
+                            shop.level = self.player.level
                             self.play_sound("gold")
                             try:
                                 shop_items = self._mixed_roll(
@@ -1855,8 +2407,8 @@ class GameUI:
                         self.selected_bench_idx = None
                         break
                     # ── Кнопка начала раунда ──
-                    start_rect = pygame.Rect(self.width // 2 - 75,
-                                             self.height - 90, 150, 30)
+                    start_rect = pygame.Rect(self.width // 2 - 100,
+                                             self.height - 90, 200, 44)
                     if start_rect.collidepoint(mx, my):
                         done_draft = True
                         break
@@ -1885,7 +2437,8 @@ class GameUI:
                                 (available_shop_width - (SHOP_CARD_COUNT - 1) * SHOP_CARD_MARGIN)
                                 // SHOP_CARD_COUNT,
                             )
-                            shop_card_h = int(shop_card_w * SHOP_CARD_ASPECT)
+                            shop_card_h = min(int(shop_card_w * SHOP_CARD_ASPECT),
+                                              BENCH_Y0 - SHOP_Y0 - 12)
                             shop_step = shop_card_w + SHOP_CARD_MARGIN
                             sx = SCREEN_MARGIN + i * shop_step
                             if sx + shop_card_w > self.width - 130:
@@ -1899,8 +2452,8 @@ class GameUI:
                                     try:
                                         shop.buy_item(player, item_key)
                                         shop_items[i] = None  # слот очищается после покупки предмета
-                                    except Exception:
-                                        pass
+                                    except ShopError as e:
+                                        self.draft_message = (str(e), pygame.time.get_ticks())
                                 else:
                                     # Юнит
                                     try:
@@ -1908,8 +2461,8 @@ class GameUI:
                                         self.play_sound("buy")
                                         shop_items[i] = None  # слот очищается после покупки
                                         self.selected_shop_idx = None
-                                    except Exception:
-                                        pass
+                                    except ShopError as e:
+                                        self.draft_message = (str(e), pygame.time.get_ticks())
                                 self.selected_bench_idx = None
                                 break
                         else:
@@ -1918,7 +2471,7 @@ class GameUI:
                             bench_panel_w = self.width // 3 - 40
                             bench_cell_w = max(
                                 50,
-                                (bench_panel_w - (BENCH_COLS - 1) * BENCH_CELL_MARGIN) // BENCH_COLS,
+                                (bench_panel_w - 2 * BENCH_SIDE_PAD - (BENCH_COLS - 1) * BENCH_CELL_MARGIN) // BENCH_COLS,
                             )
                             bench_cell_h = bench_cell_w
                             for i in range(min(len(player.reserve), BENCH_MAX)):
@@ -2010,18 +2563,18 @@ class GameUI:
                                                 # Добавим на поле с координатами
                                                 new_unit = {
                                                     "name": unit_name,
-                                                    "star": int(unit_name.split("★")[1]) if "★" in unit_name else 1,
+                                                    "star": star_level(unit_name),
                                                     "row": click_r,
                                                     "col": click_c,
                                                 }
-                                                name_base = unit_name.split("★")[0]
+                                                name_base = base_name(unit_name)
                                                 if name_base in all_units:
                                                     ud = all_units[name_base]
                                                     player.board.append(new_unit)
                                                     shop.set_base_stats(
                                                         player, len(player.board) - 1,
-                                                        int(ud["hp"] * (1.5 if new_unit.get("star", 1) == 2 else 2.0 if new_unit.get("star", 1) == 3 else 1)),
-                                                        int(ud["damage"] * (1.5 if new_unit.get("star", 1) == 2 else 2.0 if new_unit.get("star", 1) == 3 else 1)),
+                                                        int(ud["hp"] * (star_multiplier(new_unit.get("star", 1)))),
+                                                        int(ud["damage"] * (star_multiplier(new_unit.get("star", 1)))),
                                                         ud["attack_speed"])
                                                 self.play_sound("click")
                                             self.selected_field_cell = cell_key
@@ -2032,6 +2585,7 @@ class GameUI:
                     mx, my = event.pos
                     # ── Если тащили юнт с벤ча — разместить на клетке поля ──
                     if self.drag_bench_idx is not None:
+                        placed = False
                         field_x0 = self.width // 3 + 10
                         field_y0 = BOARD_Y0
                         field_panel_w = self.width // 3 - 20
@@ -2070,20 +2624,34 @@ class GameUI:
                                             player.reserve.pop(bench_idx)
                                             new_unit = {
                                                 "name": unit_name,
-                                                "star": int(unit_name.split("★")[1]) if "★" in unit_name else 1,
+                                                "star": star_level(unit_name),
                                                 "row": click_r,
                                                 "col": click_c,
                                             }
-                                            name_base = unit_name.split("★")[0]
+                                            name_base = base_name(unit_name)
                                             if name_base in all_units:
                                                 ud = all_units[name_base]
                                                 player.board.append(new_unit)
                                                 shop.set_base_stats(
                                                     player, len(player.board) - 1,
-                                                    int(ud["hp"] * (1.5 if new_unit.get("star", 1) == 2 else 2.0 if new_unit.get("star", 1) == 3 else 1)),
-                                                    int(ud["damage"] * (1.5 if new_unit.get("star", 1) == 2 else 2.0 if new_unit.get("star", 1) == 3 else 1)),
+                                                    int(ud["hp"] * (star_multiplier(new_unit.get("star", 1)))),
+                                                    int(ud["damage"] * (star_multiplier(new_unit.get("star", 1)))),
                                                     ud["attack_speed"])
                                                 self.play_sound("click")
+                                                placed = True
+                        # Продажа перетаскиванием в корзину (если не разместили на поле)
+                        if not placed and self._sell_bin_rect().collidepoint(mx, my):
+                            bench_idx = self.drag_bench_idx
+                            if bench_idx < len(player.reserve):
+                                unit_name = player.reserve[bench_idx]
+                                base = base_name(unit_name)
+                                cost = self.all_units.get(base, {}).get("cost", 1)
+                                try:
+                                    draft_phase.sell_unit(player, bench_idx)
+                                    player.gold += cost
+                                    self.play_sound("gold")
+                                except ShopError as e:
+                                    self.draft_message = (str(e), pygame.time.get_ticks())
                         self.drag_bench_idx = None
 
                     # ── Если тащили юнт с клетки поля — разместить на новой клетке ──
@@ -2124,59 +2692,82 @@ class GameUI:
                                     player.board.append(unit_data)
                                     # Пересчитать статы для нового индекса
                                     idx = len(player.board) - 1
-                                    name_base = unit_data["name"].split("★")[0]
+                                    name_base = base_name(unit_data["name"])
                                     if name_base in all_units:
                                         ud = all_units[name_base]
                                         shop.set_base_stats(
                                             player, idx,
-                                            int(ud["hp"] * (1.5 if unit_data.get("star", 1) == 2 else 2.0 if unit_data.get("star", 1) == 3 else 1)),
-                                            int(ud["damage"] * (1.5 if unit_data.get("star", 1) == 2 else 2.0 if unit_data.get("star", 1) == 3 else 1)),
+                                            int(ud["hp"] * (star_multiplier(unit_data.get("star", 1)))),
+                                            int(ud["damage"] * (star_multiplier(unit_data.get("star", 1)))),
                                             ud["attack_speed"])
                                     self.play_sound("click")
                                     placed = True
                         if not placed:
-                            # Клик на скамейке — вернуть юнта на скамейку (не на доску)
-                            bench_cell_w = max(
-                                50,
-                                ((self.width // 3 - 40) - (BENCH_COLS - 1) * BENCH_CELL_MARGIN) // BENCH_COLS,
-                            )
-                            bench_cell_h = bench_cell_w
-                            bench_x0 = BENCH_X0
-                            bench_y0 = BENCH_Y0 + 30
-                            bench_x1 = bench_x0 + BENCH_COLS * bench_cell_w + (BENCH_COLS - 1) * BENCH_CELL_MARGIN
-                            bench_y1 = bench_y0 + BENCH_ROWS * bench_cell_h + (BENCH_ROWS - 1) * BENCH_CELL_MARGIN
-                            on_bench = (
-                                bench_x0 <= mx <= bench_x1
-                                and bench_y0 <= my <= bench_y1
-                                and len(player.reserve) < player.max_bench
-                            )
-                            if on_bench:
-                                # Возвращаем на скамейку
-                                unit_name = self.drag_board_data.get("name", "warrior_freshman")
-                                star = self.drag_board_data.get("star", 1)
-                                base = unit_name.split("★")[0]
-                                name_with_star = f"{base}★{star}" if star > 1 else base
-                                # Возвращаем предметы с юнита в инвентарь, иначе они исчезнут
-                                for item in self.drag_board_data.get("items", []):
-                                    player.items.append(dict(item))
-                                player.reserve.append(name_with_star)
-                                self.play_sound("click")
+                            # Продажа перетаскиванием в корзину с доски
+                            if self._sell_bin_rect().collidepoint(mx, my):
+                                idx = self.drag_board_idx
+                                if 0 <= idx < len(player.board):
+                                    unit_data = player.board[idx]
+                                    base = base_name(unit_data.get("name", ""))
+                                    cost = self.all_units.get(base, {}).get("cost", 1)
+                                    try:
+                                        draft_phase.sell_unit(
+                                            player, idx, from_board=True
+                                        )
+                                        player.gold += cost
+                                        self.play_sound("gold")
+                                    except ShopError as e:
+                                        self.draft_message = (
+                                            str(e), pygame.time.get_ticks()
+                                        )
+                                self.drag_board_idx = None
+                                self.drag_board_orig = None
+                                self.drag_board_data = None
                             else:
-                                # Клетка занята или клик вне поля — вернуть на исходную позицию
-                                orig_r, orig_c = self.drag_board_orig or (0, 0)
-                                unit_data = dict(self.drag_board_data)
-                                unit_data["row"] = orig_r
-                                unit_data["col"] = orig_c
-                                player.board.append(unit_data)
-                                idx = len(player.board) - 1
-                                name_base = unit_data["name"].split("★")[0]
-                                if name_base in all_units:
-                                    ud = all_units[name_base]
-                                    shop.set_base_stats(
-                                        player, idx,
-                                        int(ud["hp"] * (1.5 if unit_data.get("star", 1) == 2 else 2.0 if unit_data.get("star", 1) == 3 else 1)),
-                                        int(ud["damage"] * (1.5 if unit_data.get("star", 1) == 2 else 2.0 if unit_data.get("star", 1) == 3 else 1)),
-                                        ud["attack_speed"])
+                                # Клик на скамейке — вернуть юнта на скамейку (не на доску)
+                                bench_cell_w = max(
+                                    50,
+                                    ((self.width // 3 - 40) - 2 * BENCH_SIDE_PAD
+                                     - (BENCH_COLS - 1) * BENCH_CELL_MARGIN)
+                                    // BENCH_COLS,
+                                )
+                                bench_cell_h = bench_cell_w
+                                bench_x0 = BENCH_X0
+                                bench_y0 = BENCH_Y0 + 30
+                                bench_x1 = bench_x0 + BENCH_COLS * bench_cell_w + (BENCH_COLS - 1) * BENCH_CELL_MARGIN
+                                bench_y1 = bench_y0 + BENCH_ROWS * bench_cell_h + (BENCH_ROWS - 1) * BENCH_CELL_MARGIN
+                                on_bench = (
+                                    bench_x0 <= mx <= bench_x1
+                                    and bench_y0 <= my <= bench_y1
+                                    and len(player.reserve) < player.max_bench
+                                )
+                                if on_bench:
+                                    # Возвращаем на скамейку
+                                    unit_name = self.drag_board_data.get("name", "warrior_freshman")
+                                    star = self.drag_board_data.get("star", 1)
+                                    base = base_name(unit_name)
+                                    name_with_star = f"{base}★{star}" if star > 1 else base
+                                    # Возвращаем предметы с юнита в инвентарь, иначе они исчезнут
+                                    for item in self.drag_board_data.get("items", []):
+                                        player.items.append(dict(item))
+                                    player.reserve.append(name_with_star)
+                                    self.play_sound("click")
+                                else:
+                                    # Клетка занята или клик вне поля — вернуть на исходную позицию
+                                    orig_r, orig_c = self.drag_board_orig or (0, 0)
+                                    unit_data = dict(self.drag_board_data)
+                                    unit_data["row"] = orig_r
+                                    unit_data["col"] = orig_c
+                                    player.board.append(unit_data)
+                                    idx = len(player.board) - 1
+                                    name_base = base_name(unit_data["name"])
+                                    if name_base in all_units:
+                                        ud = all_units[name_base]
+                                        shop.set_base_stats(
+                                            player, idx,
+                                            int(ud["hp"] * (star_multiplier(unit_data.get("star", 1)))),
+                                            int(ud["damage"] * (star_multiplier(unit_data.get("star", 1)))),
+                                            ud["attack_speed"])
                         self.drag_board_idx = None
                         self.drag_board_orig = None
                         self.drag_board_data = None
@@ -2197,12 +2788,41 @@ class GameUI:
                 shop=shop,
             )
 
+            # ── Панель участников (всегда видима в драфте) ──
+            participants = self._gather_participants()
+            self.draw_player_list_panel(participants)
+
+            # Модальные оверлеи поверх всего
+            if self.leaderboard_open:
+                self.draw_leaderboard(participants)
+            elif self.viewing_board is not None:
+                view = self._find_participant(participants)
+                if view is not None:
+                    self.draw_board_view(view)
+
             pygame.display.flip()
             self.clock.tick(30)
 
-        # Convert board to battle format — единая сборка через build_combat_team
+        # Драфт мог завершиться (Enter/кнопка «Начать раунд») прямо во время
+        # перетаскивания юнита с поля: он временно убран с доски. Возвращаем на
+        # исходную клетку, иначе юнит потеряется при сборке board_format. Бенч-юнит
+        # при драге из reserve не удаляется — просто сбрасываем состояние драга.
+        if self.drag_board_idx is not None and self.drag_board_data is not None:
+            orig_r, orig_c = self.drag_board_orig or (0, 0)
+            unit_data = dict(self.drag_board_data)
+            unit_data["row"] = orig_r
+            unit_data["col"] = orig_c
+            player.board.append(unit_data)
+        self.drag_board_idx = None
+        self.drag_board_orig = None
+        self.drag_board_data = None
+        self.drag_bench_idx = None
+
+        # Convert board to battle format — единая сборка через build_combat_team.
+        # Вся доска (лимит = player.max_board = уровень игрока), а не первые 6 —
+        # иначе на уровнях 7+ юниты сверх шести не участвовали в бою.
         player_units = build_combat_team(
-            player.board[:6],
+            player.board,
             all_units,
             synergy_data=synergy_data,
             race_synergy_data=data.get("race_synergies", {}),
@@ -2232,6 +2852,29 @@ class GameUI:
             for u in player.board
         ]
         return player_units, player.gold, player.items, list(player.reserve), board_format, player.level, player.xp, player.win_streak, player.loss_streak
+
+    def _sell_bin_rect(self) -> pygame.Rect:
+        """Геометрия полосы продажи под панелью бенча (левый край, под панелью).
+
+        Вычисление одно и то же для отрисовки и для хит-теста в обработчике дропа.
+        """
+        bench_panel_w = self.width // 3 - 40
+        bench_cell_w = max(
+            50,
+            (bench_panel_w - 2 * BENCH_SIDE_PAD - (BENCH_COLS - 1) * BENCH_CELL_MARGIN)
+            // BENCH_COLS,
+        )
+        bench_cell_h = bench_cell_w
+        bench_panel_h = (
+            40
+            + BENCH_ROWS * bench_cell_h
+            + (BENCH_ROWS - 1) * BENCH_CELL_MARGIN
+            + 10
+        )
+        y = BENCH_Y0 + bench_panel_h + 6
+        w = bench_panel_w
+        h = min(44, (self.height - 90) - y - 6)
+        return pygame.Rect(10, y, w, h)
 
     def _get_unit_positions(self, player_units, enemy_units):
         """Позиции на едином тактическом поле 10×5: игрок cols 0-4, враг cols 5-9."""
@@ -2278,8 +2921,8 @@ class GameUI:
         if frame_idx > 0 and frame_idx <= len(sim._tick_history):
             sim.restore_from_snapshot(sim._tick_history[frame_idx - 1])
 
-        player_units = [u for u in sim.teams.get("player", [])]
-        enemy_units = [u for u in sim.teams.get("enemy", [])]
+        player_units = list(sim.teams.values())[0] if sim.teams else []
+        enemy_units = list(sim.teams.values())[1] if len(sim.teams) > 1 else []
 
         # Get positions for each unit
         positions = self._get_unit_positions(player_units, enemy_units)
@@ -2293,6 +2936,53 @@ class GameUI:
         # Разделительная линия и VS на стыке между сетками (между col 4 и col 5)
         vs_x = offset_x + 5 * cell_w
         self.draw_vs(vs_x, offset_y + cell_h // 2, target=surf)
+
+        # Бейдж активной расовой синергии для каждой команды
+        for team_idx, (team_name, team_units) in enumerate(sim.teams.items()):
+            race_counts = {}
+            for u in team_units:
+                r = getattr(u, "race", "")
+                race_counts[r] = race_counts.get(r, 0) + 1
+            # Найти расу с максимальным числом и активный порог
+            best_race = None
+            best_count = 0
+            for r, c in race_counts.items():
+                if c > best_count:
+                    best_count = c
+                    best_race = r
+            if best_race and best_count >= 2:
+                syn_info = sim.race_synergy_data.get(best_race, {})
+                thresholds = syn_info.get("thresholds", [])
+                bonuses = syn_info.get("bonuses", {})
+                active_level = None
+                for th in sorted(thresholds):
+                    if best_count >= th:
+                        active_level = th
+                if active_level:
+                    bonus = bonuses.get(str(active_level), {})
+                    desc_parts = []
+                    if "evasion_pct" in bonus:
+                        desc_parts.append(f"Уклонение {bonus['evasion_pct']}%")
+                    if "lifesteal_pct" in bonus:
+                        desc_parts.append(f"Вампиризм {bonus['lifesteal_pct']}%")
+                    if "berserker" in bonus:
+                        b = bonus["berserker"]
+                        desc_parts.append(f"Берсерк {b['damage_pct'][-1]}% урона")
+                    if "revive" in bonus:
+                        rv = bonus["revive"]
+                        desc_parts.append(f"Восстание {rv['hp_pct']}%/{rv['max_revives']}")
+                    if "unity_damage_pct" in bonus:
+                        desc_parts.append(f"Единство +{bonus['unity_damage_pct']}% урон/HP")
+                    if desc_parts:
+                        badge_text = f"{best_race.upper()} {active_level}: " + ", ".join(desc_parts)
+                        badge_y = offset_y - 28 - team_idx * 20
+                        badge_x = vs_x + (team_idx - 0) * 200
+                        self.draw_text_overlay(
+                            surf, badge_text, self.font_tiny,
+                            badge_x, badge_y, 300, 14,
+                            align="center", text_color=(255, 215, 0),
+                        )
+
 
         # Фон игрового поля — единая текстура камня на всю ширину (10 колонок)
         board_w = 10 * cell_w
@@ -2366,6 +3056,17 @@ class GameUI:
                 bar_x, bar_y - 10, bar_w, 10,
                 align="center",
             )
+            # Берсерк (орки): иконка ярости при HP≤порога
+            berserker = getattr(unit, "berserker", None)
+            if berserker:
+                hp_pct_now = unit.hp / max(unit.max_hp, 1) * 100.0
+                thresholds = sorted(berserker.get("hp_thresholds", []))
+                if thresholds and hp_pct_now <= thresholds[-1]:
+                    self.draw_text_overlay(
+                        surf, "ЯРОСТЬ", self.font_tiny,
+                        cell_x + 2, cell_y + cell_h - 34, cell_w - 4, 10,
+                        align="center", text_color=(255, 80, 80),
+                    )
 
         for unit in enemy_units:
             if not unit.alive:
@@ -2415,6 +3116,17 @@ class GameUI:
                 bar_x, bar_y - 10, bar_w, 10,
                 align="center",
             )
+            # Берсерк (орки): иконка ярости при HP≤порога
+            berserker = getattr(unit, "berserker", None)
+            if berserker:
+                hp_pct_now = unit.hp / max(unit.max_hp, 1) * 100.0
+                thresholds = sorted(berserker.get("hp_thresholds", []))
+                if thresholds and hp_pct_now <= thresholds[-1]:
+                    self.draw_text_overlay(
+                        surf, "ЯРОСТЬ", self.font_tiny,
+                        cell_x + 2, cell_y + cell_h - 34, cell_w - 4, 10,
+                        align="center", text_color=(255, 80, 80),
+                    )
 
         # Draw dead units (faded)
         for unit in player_units + enemy_units:
@@ -2564,7 +3276,7 @@ class GameUI:
                 is_heal = etype == "ability_heal"
                 if is_heal:
                     dmg_color = (100, 255, 100)  # зелёное число — исцеление
-                    show_amount = heal
+                    show_amount = f"+{heal:.0f}"
                 else:
                     dmg_color = (255, 50, 50) if is_kill else (255, 100, 50)
                     show_amount = dmg
@@ -2590,6 +3302,37 @@ class GameUI:
                     self.play_sound("ability", 0.7)
                 else:
                     self.play_sound("hit", 0.7)
+
+            # Промах от уклонения (эльфы)
+            if etype == "miss":
+                target = find_unit(event.get("target_id"))
+                if target:
+                    t_pos = positions.get(target)
+                    if t_pos:
+                        effects["damage_numbers"].append(
+                            DamageNumber(t_pos[0], t_pos[1] - 30, "MISS", (180, 180, 180)))
+
+            # Вампиризм (демоны): зелёное число хила над атакующим
+            if etype == "lifesteal":
+                attacker = find_unit(event.get("attacker_id"))
+                if attacker:
+                    a_pos = positions.get(attacker)
+                    if a_pos:
+                        heal = event.get("heal", 0)
+                        effects["damage_numbers"].append(
+                            DamageNumber(a_pos[0], a_pos[1] - 30, f"+{heal:.0f}", (100, 255, 100)))
+                        self.play_sound("ability", 0.6)
+
+            # Восстание (нежить): визуал подъёма над юнитом
+            if etype == "revive":
+                target = find_unit(event.get("target_id"))
+                if target:
+                    t_pos = positions.get(target)
+                    if t_pos:
+                        effects["damage_numbers"].append(
+                            DamageNumber(t_pos[0], t_pos[1] - 30, "REVIVE", (200, 200, 100)))
+                        effects["death_effects"].append(DeathEffect(t_pos[0], t_pos[1]))
+                        self.add_shake(2.0)
 
             # Способность: расширяющееся кольцо с названием
             if (etype.startswith("ability") or "ability_name" in event
@@ -2631,6 +3374,7 @@ class GameUI:
         """
         self.init()
         self.running = True
+        self._game_instance = game_instance
 
         BG_COLOR = (20, 20, 30)
 
@@ -2656,8 +3400,16 @@ class GameUI:
                 
                 elif event.type == pygame.KEYDOWN:
                     # Handle global hotkeys
-                    if event.key == pygame.K_ESCAPE:
-                        self.running = False
+                    if event.key == KEY_LEADERBOARD:
+                        self.leaderboard_open = not self.leaderboard_open
+                        self.viewing_board = None
+                    elif event.key == pygame.K_ESCAPE:
+                        if self.leaderboard_open:
+                            self.leaderboard_open = False
+                        elif self.viewing_board is not None:
+                            self.viewing_board = None
+                        else:
+                            self.running = False
                     elif event.key == pygame.K_SPACE:
                         paused = not paused
                     elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, getattr(pygame, 'K_KP_PLUS', None)):
@@ -2810,6 +3562,16 @@ class GameUI:
                 completed = current_round_idx if tick_count > 0 else -1
                 self.draw_round_progress(completed, len(history))
 
+                # ── Панель участников (всегда видима в бою) ──
+                participants = self._gather_participants()
+                self.draw_player_list_panel(participants)
+                if self.leaderboard_open:
+                    self.draw_leaderboard(participants)
+                elif self.viewing_board is not None:
+                    view = self._find_participant(participants)
+                    if view is not None:
+                        self.draw_board_view(view)
+
                 last_processed_tick = tick_count
                 tick_count += self.ticks_per_frame
 
@@ -2829,6 +3591,15 @@ class GameUI:
                     sim,
                     {"damage_numbers": [], "death_effects": [], "lines": []}
                 )
+                # ── Панель участников (всегда видима в бою) ──
+                participants = self._gather_participants()
+                self.draw_player_list_panel(participants)
+                if self.leaderboard_open:
+                    self.draw_leaderboard(participants)
+                elif self.viewing_board is not None:
+                    view = self._find_participant(participants)
+                    if view is not None:
+                        self.draw_board_view(view)
 
                 winner = state.battle_result["winner"] if state.battle_result else "?"
                 ticks = state.battle_result.get("ticks", "?") if state.battle_result else "?"
@@ -2924,7 +3695,7 @@ class GameUI:
         import random as _random
         if seed is None:
             seed = _random.randint(0, 2 ** 31 - 1)
-        from game.core.round import load_game_data, build_creep_units
+        from game.core.round import Game, load_game_data, build_creep_units
         from game.core.shop import Shop
         from game.core.pool import Pool
         from game.core.draft import DraftPhase
@@ -2959,8 +3730,21 @@ class GameUI:
         player_xp = 0
         self.player = None
         self.player_hp = START_HP
-        self.bot_hp = START_HP
-        self.bot_level = 1
+        # 7 постоянных ботов (соперники по очереди), чтобы показать 8 участников матча.
+        self.match_bots = []
+        bot_presets = ["balanced", "aggressive", "casual", "saver", "synergy_focus", "random", "balanced"]
+        for i in range(7):
+            self.match_bots.append({
+                "name": f"Bot {i+1}",
+                "preset": bot_presets[i],
+                "hp": START_HP,
+                "level": 1,
+                "gold": 20,
+                "board_units": [],      # купленные юниты, сохраняются между раундами
+                "dead": False,
+                "seed_base": 1000 + i,
+            })
+        self.pvp_round_index = 0
         history = []  # list of round result dicts
         all_sims = {}  # round_num -> BattleSimulator
         # Купленные юниты, предметы и скамейка между раундами.
@@ -2974,6 +3758,7 @@ class GameUI:
             round_num += 1
             # Раунды 1-3 — крипы, потом каждый третий (6, 9, ...) — крип, остальные — PvP
             is_creep = round_num <= 3 or round_num % 3 == 0
+            bot_data = None  # соперник этого раунда (PvP); None для крип-раундов
 
             # ── Драфт игрока. С ПЕРВОГО раунда. ────────────────────────────
             # Раньше крип-раунды шли с захардкоженным составом, то есть три
@@ -2987,7 +3772,7 @@ class GameUI:
                 "xp": player_xp,
                 "win_streak": self.player.win_streak if self.player is not None else 0,
                 "loss_streak": self.player.loss_streak if self.player is not None else 0,
-            } if stored_player_units else None
+            } if stored_player_units is not None else None
             result = self._run_interactive_draft(
                 round_num=round_num,
                 is_creep=is_creep,
@@ -3011,116 +3796,249 @@ class GameUI:
                     race_synergy_data=data.get("race_synergies", {}),
                     race_data=data.get("races", {}),
                 )
-            else:
-                # Bot drafts enemy units via shop — bot has its own economy (independent from player)
-                bot_gold = 20  # bot economy — enough for a full board
-                bot = create_bot(preset=enemy_bot, seed=seed + round_num)
-                rng = random.Random(seed + round_num * 100)
-                pool = Pool(unit_costs)
-                shop = Shop(pool, unit_costs=unit_costs, rng=rng)
-                draft_phase = DraftPhase(shop, all_units)
-                enemy_player = Player(gold=bot_gold)
-                
-                # Bot decides what to buy with its own gold.
-                # synergy_data раньше передавался пустым — из-за этого
-                # синергийная логика MEDIUM-бота не работала никогда.
-                draft_decision = bot.decide_draft(
-                    available_units=all_units, gold=bot_gold, current_team=[],
-                    synergy_data=data["synergies"],
+                # Бой игрока с волной крипов
+                sim = BattleSimulator(
+                    seed=seed + round_num,
+                    race_data=data["races"],
+                    race_synergy_data=data["race_synergies"],
                 )
-                
-                purchased = []
-                for unit_info in draft_decision:
-                    name = unit_info["name"]
-                    cost = unit_info.get("cost", 1)
-                    if enemy_player.gold >= cost:
-                        try:
-                            # buy_unit -> Shop.buy уже списывает золото
-                            merged_name = draft_phase.buy_unit(enemy_player, name)
-                            purchased.append(merged_name)
-                        except Exception:
-                            pass
-                
-                # Convert to battle format — единая сборка через build_combat_team
-                enemy_units = build_combat_team(
-                    [
-                        {
-                            "name": pu,
-                            "star": 1 if "★" not in pu else int(pu.split("★")[1][1:]),
-                        }
-                        for pu in purchased[:6]
-                    ],
-                    all_units,
-                    synergy_data=data["synergies"],
-                    race_synergy_data=data.get("race_synergies", {}),
-                    race_data=data.get("races", {}),
-                )
-
-                if not enemy_units:
-                    enemy_units = [
-                        {"name": "warrior_freshman", "hp": 500, "damage": 40, "attack_speed": 1.2, "range_": 1, "class": "warrior"},
-                        {"name": "mage_acolyte", "hp": 300, "damage": 65, "attack_speed": 1.0, "range_": 4, "class": "mage"},
-                    ]
-
-            # Run battle simulation
-            sim = BattleSimulator(seed=seed + round_num, race_data=data["races"], race_synergy_data=data["race_synergies"])
-            sim.add_team("player", player_units)
-            sim.add_team("enemy", enemy_units)
-            battle_result = sim.run()
-            total_ticks = sim.get_total_ticks()
-
-            # Economy: проигранный PvP бьёт тем сильнее,
-            # чем больше врагов уцелело
-            pvp_win = not is_creep and battle_result["winner"] == "player"
-            creep_win = is_creep and battle_result["winner"] == "player"
-
-            # PvP HP damage: проигранный боец теряет HP
-            # Базовый урон растёт с номером раунда
-            base_dmg = 5
-            if round_num <= 10:
-                base_dmg = 5
-            elif round_num <= 20:
-                base_dmg = 10
-            elif round_num <= 30:
-                base_dmg = 15
-            else:
-                base_dmg = 20
-
-            if not is_creep:
-                surviving_enemies = sum(
-                    1 for u in sim.teams.get("enemy", []) if u.alive)
-                surviving_players = sum(
-                    1 for u in sim.teams.get("player", []) if u.alive)
-
-                if pvp_win:
-                    # Игрок выиграл — урон боту
-                    damage = base_dmg + 2 * surviving_enemies
-                    self.bot_hp = max(0, self.bot_hp - damage)
-                    hp_lost = 0
+                sim.add_team("Игрок", player_units)
+                sim.add_team("Крипы", enemy_units)
+                battle_result = sim.run()
+                total_ticks = sim.get_total_ticks()
+                # Стандартизируем winner для совместимости с отчётом
+                if battle_result["winner"] == "Игрок":
+                    battle_result["winner"] = "player"
+                    pvp_win = False
+                    creep_win = True
                 else:
-                    # Игрок проиграл — урон игроку
-                    damage = base_dmg + 2 * surviving_players
-                    self.player_hp = max(0, self.player_hp - damage)
-                    hp_lost = damage
-            else:
-                surviving_enemies = 0
+                    battle_result["winner"] = "enemy"
+                    pvp_win = False
+                    creep_win = False
                 hp_lost = 0
+                eliminated = self.player_hp <= 0
+                player_opponent_name = None
+                # Золото и киллы для крип-раундов
+                kills = sum(1 for e in sim.log
+                            if e.get("type") in ("kill", "ability_kill")
+                            and e.get("killer_team") == "Игрок")
+                kill_gold = KILL_GOLD_PER_UNIT * kills
+                surviving_enemies = 0
+                surviving_players = sum(1 for u in sim.teams.get("Игрок", []) if u.alive)
+                econ = round_economy(
+                    gold=gold, pvp_win=False, creep_win=creep_win,
+                    is_creep=True,
+                    surviving_enemy_units=0,
+                    win_streak=self.player.win_streak,
+                    loss_streak=self.player.loss_streak,
+                )
+                gold = econ["gold_after"] + kill_gold
+            else:
+                # PvP-раунд: все живые участники делятся на пары (все против всех).
+                # Пары: (1-й со 2-м), (3-й с 4-м), … с ротацией через порядок в living_names.
+                # При нечётном числе живых — первый участник сражается с копией себя.
 
-            creep_win = is_creep and battle_result["winner"] == "player"
-            kills = sum(1 for e in sim.log
-                        if e.get("type") in ("kill", "ability_kill")
-                        and e.get("killer_team") == "player")
-            kill_gold = KILL_GOLD_PER_UNIT * kills
-            econ = round_economy(
-                gold=gold, pvp_win=pvp_win, creep_win=creep_win,
-                is_creep=is_creep,
-                surviving_enemy_units=surviving_enemies,
-                win_streak=self.player.win_streak,
-                loss_streak=self.player.loss_streak,
-            )
-            gold = econ["gold_after"] + kill_gold
-            # HP управляется вручную (self.player_hp, self.bot_hp), не через econ
-            eliminated = self.player_hp <= 0
+                living_bots = [b for b in self.match_bots if b["hp"] > 0]
+
+                # Состав каждой команды на этот раунд
+                units_by_name: dict[str, list[dict]] = {"Игрок": player_units}
+
+                # Каждый живой бот покупает/докупает юнитов (экономика переносится между раундами)
+                for bot_data in living_bots:
+                    bot_gold = bot_data["gold"]
+                    bot = create_bot(
+                        preset=bot_data["preset"],
+                        seed=seed + round_num + bot_data["seed_base"],
+                    )
+                    rng = random.Random(seed + round_num * 100 + bot_data["seed_base"])
+                    pool = Pool(unit_costs)
+                    shop = Shop(pool, unit_costs=unit_costs, rng=rng)
+                    draft_phase_bot = DraftPhase(shop, all_units)
+                    enemy_player = Player(gold=bot_gold)
+
+                    draft_decision = bot.decide_draft(
+                        available_units=all_units, gold=bot_gold, current_team=[],
+                        synergy_data=data["synergies"],
+                    )
+
+                    purchased = []
+                    for unit_info in draft_decision:
+                        name = unit_info["name"]
+                        cost = unit_info.get("cost", 1)
+                        if enemy_player.gold >= cost:
+                            try:
+                                merged_name = draft_phase_bot.buy_unit(enemy_player, name)
+                                purchased.append(merged_name)
+                            except ShopError:
+                                pass  # не хватило пула или резерв полон
+                    bot_data["gold"] = enemy_player.gold  # экономика бота между раундами
+
+                    # Сохраняем composition для панели участников
+                    bot_board = []
+                    for pu in purchased[:6]:
+                        base = base_name(pu)
+                        star = star_level(pu)
+                        ud = all_units.get(base, {})
+                        bot_board.append({
+                            "name": self.display_name(pu),
+                            "key": base,
+                            "star": star,
+                            "cls": ud.get("class", "warrior"),
+                            "cost": ud.get("cost", 1),
+                            "race": ud.get("race", "human"),
+                        })
+                    bot_data["board_units"] = bot_board
+                    bot_data["level"] = Game._bot_level_for_round(round_num)
+
+                    # Боевой состав через build_combat_team
+                    bot_units_data = [
+                        {"name": pu, "star": star_level(pu)}
+                        for pu in purchased[:6]
+                    ]
+                    bot_team = build_combat_team(
+                        bot_units_data, all_units,
+                        synergy_data=data["synergies"],
+                        race_synergy_data=data.get("race_synergies", {}),
+                        race_data=data.get("races", {}),
+                    )
+                    if not bot_team:
+                        bot_team = [
+                            {"name": "warrior_freshman", "hp": 500, "damage": 40,
+                             "attack_speed": 1.2, "range_": 1, "class": "warrior"},
+                        ]
+                    units_by_name[bot_data["name"]] = bot_team
+
+                # Живые участники: игрок + живые боты
+                living_names = ["Игрок"] + [b["name"] for b in living_bots]
+
+                # Нечётное → копия первого участника
+                copy_name = None
+                if len(living_names) % 2 == 1:
+                    copy_name = living_names[0] + " (копия)"
+                    units_by_name[copy_name] = [dict(u) for u in units_by_name[living_names[0]]]
+                    living_names.append(copy_name)
+
+                # Проводим все парные бои
+                pair_results = []  # (name_a, name_b, sim, battle_result, winner, loser, dmg)
+
+                for i in range(0, len(living_names), 2):
+                    name_a, name_b = living_names[i], living_names[i + 1]
+                    team_a = units_by_name.get(name_a, [])
+                    team_b = units_by_name.get(name_b, [])
+
+                    sim = BattleSimulator(
+                        seed=seed + round_num + i,
+                        race_data=data["races"],
+                        race_synergy_data=data["race_synergies"],
+                    )
+
+                    # Активные способности, критики, класс — из JSON
+                    for team in (team_a, team_b):
+                        for u in team:
+                            nb = base_name(u.get("name", ""))
+                            if nb in all_units:
+                                ud = all_units[nb]
+                                if ud.get("active"):
+                                    u["active"] = dict(ud["active"])
+                                u.setdefault("crit_chance", ud.get("crit_chance", 0))
+                                u.setdefault("unit_class", ud.get("class", ""))
+
+                    sim.add_team(name_a, team_a)
+                    sim.add_team(name_b, team_b)
+                    br = sim.run()
+
+                    winner = br["winner"]  # name_a или name_b
+                    loser = name_b if winner == name_a else name_a
+
+                    dmg = 0
+                    if not is_creep:
+                        surv_winner = sum(1 for u in sim.teams[winner] if u.alive)
+                        dmg = pvp_round_damage(round_num, surv_winner)
+
+                        # Урон проигравшему
+                        if loser == "Игрок":
+                            self.player_hp = max(0, self.player_hp - dmg)
+                            hp_lost = dmg
+                        else:
+                            for b in self.match_bots:
+                                if b["name"] == loser:
+                                    b["hp"] = max(0, b["hp"] - dmg)
+                                    if b["hp"] <= 0:
+                                        b["dead"] = True
+                                    break
+                            hp_lost = 0  # для игрока урон нанёс бот, а не наоборот
+
+                        # Серии побед/поражений игрока
+                        if name_a == "Игрок":
+                            if winner == "Игрок":
+                                self.player.record_win()
+                            else:
+                                self.player.record_loss()
+                        elif name_b == "Игрок":
+                            if winner == "Игрок":
+                                self.player.record_win()
+                            else:
+                                self.player.record_loss()
+
+                    pair_results.append(
+                        (name_a, name_b, sim, br, winner, loser, dmg)
+                    )
+
+                # Результат для отображения: пара, в которой участвовал игрок
+                player_pair = None
+                for pr in pair_results:
+                    if pr[0] == "Игрок" or pr[1] == "Игрок":
+                        player_pair = pr
+                        break
+
+                if player_pair:
+                    name_a, name_b, sim, battle_result, winner, loser, dmg = player_pair
+                    total_ticks = sim.get_total_ticks()
+                    pvp_win = winner == "Игрок"
+                    creep_win = False
+                    # Стандартизируем winner для итогового отчёта
+                    battle_result["winner"] = "player" if pvp_win else "enemy"
+                    if pvp_win:
+                        hp_lost = 0
+                    else:
+                        hp_lost = dmg
+                    # Выжившие для статистики
+                    enemy_name = name_b if name_a == "Игрок" else name_a
+                    player_opponent_name = enemy_name
+                    surviving_enemies = sum(
+                        1 for u in sim.teams.get(enemy_name, []) if u.alive)
+                    surviving_players = sum(
+                        1 for u in sim.teams.get("Игрок", []) if u.alive)
+                else:
+                    # Игрок не участвовал в этой паре (не должно быть, но на всякий)
+                    battle_result = {"winner": "player", "reason": "no_fight"}
+                    total_ticks = 0
+                    pvp_win = True
+                    creep_win = False
+                    surviving_enemies = 0
+                    surviving_players = 0
+                    hp_lost = 0
+                    player_opponent_name = None
+                    sim = BattleSimulator(
+                        seed=seed + round_num,
+                        race_data=data["races"],
+                        race_synergy_data=data["race_synergies"],
+                    )
+
+                # Золото и киллы игрока (с его боя)
+                kills = sum(1 for e in sim.log
+                            if e.get("type") in ("kill", "ability_kill")
+                            and e.get("killer_team") == "Игрок")
+                kill_gold = KILL_GOLD_PER_UNIT * kills
+                econ = round_economy(
+                    gold=gold, pvp_win=pvp_win, creep_win=creep_win,
+                    is_creep=is_creep,
+                    surviving_enemy_units=surviving_enemies,
+                    win_streak=self.player.win_streak,
+                    loss_streak=self.player.loss_streak,
+                )
+                gold = econ["gold_after"] + kill_gold
+                eliminated = self.player_hp <= 0
 
             # ── Детальная статистика боя ───────────────────────────────────
             # Урон, киллы и топ юнитов из sim.log
@@ -3190,14 +4108,18 @@ class GameUI:
                 "top_damage": top_damage,
                 "top_kills": top_kills,
                 "top_heal": top_heal,
-                "bot_hp": self.bot_hp,
+                # HP оппонента игрока в его паре (или первого живого бота)
+                "bot_hp": (next((b["hp"] for b in self.match_bots
+                                 if b["name"] == player_opponent_name), 0)
+                           if player_opponent_name
+                           else (self.match_bots[0]["hp"] if self.match_bots else START_HP)),
                 "player_hp": self.player_hp,
             }
             history.append(state)
             all_sims[round_num] = sim
             
-            # Проверяем конец игры по HP
-            if self.player_hp <= 0 or self.bot_hp <= 0:
+            # Проверяем конец игры по HP (игрок или все 7 ботов)
+            if self.player_hp <= 0 or all(b["hp"] <= 0 for b in self.match_bots):
                 break
             
             # ── Battle animation phase (auto-start, no wait screen) ────────────
@@ -3223,13 +4145,33 @@ class GameUI:
                     if event.type == pygame.QUIT:
                         self.running = False
                         return
-                    if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
-                        break  # клик или клавиша пропускают паузу
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == KEY_LEADERBOARD:
+                            self.leaderboard_open = not self.leaderboard_open
+                            self.viewing_board = None
+                        elif event.key == pygame.K_ESCAPE:
+                            if self.leaderboard_open:
+                                self.leaderboard_open = False
+                            elif self.viewing_board is not None:
+                                self.viewing_board = None
+                        else:
+                            break  # любая другая клавиша пропускает паузу
+                    elif event.type == pygame.MOUSEBUTTONDOWN:
+                        break  # клик пропускает паузу
                 else:
                     self.clock.tick(30)
                     # Рисуем статистику боя поверх анимации
                     self.screen.fill(BG_COLOR)
                     self.draw_battle_stats(state)
+                    # Панель участников + оверлеи (таблица/доска) поверх статистики
+                    participants = self._gather_participants()
+                    self.draw_player_list_panel(participants)
+                    if self.leaderboard_open:
+                        self.draw_leaderboard(participants)
+                    elif self.viewing_board is not None:
+                        view = self._find_participant(participants)
+                        if view is not None:
+                            self.draw_board_view(view)
                     pygame.display.flip()
                     continue
                 break
@@ -3242,18 +4184,19 @@ class GameUI:
         self.screen.fill(BG_COLOR)
 
         player_wins = sum(1 for s in history if s["battle_result"]["winner"] == "player")
+        living_bots = sum(1 for b in self.match_bots if b["hp"] > 0)
         if self.player_hp <= 0:
             winner = "enemy"
             verdict = "ПОРАЖЕНИЕ"
-            place = 2  # один бот живой + 1 = 2 место
-        elif self.bot_hp <= 0:
+            place = living_bots + 1  # место по числу живых ботов + игрок
+        elif all(b["hp"] <= 0 for b in self.match_bots):
             winner = "player"
             verdict = "ПОБЕДА"
             place = 1
         else:
             winner = "player" if player_wins > len(history) - player_wins else "enemy"
             verdict = "ПОБЕДА" if winner == "player" else "ПОРАЖЕНИЕ"
-            place = 1 if winner == "player" else 2
+            place = 1 if winner == "player" else living_bots + 1
 
         self.draw_result(verdict, "?")
         self.play_sound("win" if winner == "player" else "lose")
@@ -3261,7 +4204,7 @@ class GameUI:
             self.add_shake(10.0)      # проигрыш бьёт по нервам
 
         summary_surf = self.font_small.render(
-            f"Раундов сыграно: {len(history)}   |   HP игрока: {self.player_hp}   |   HP бота: {self.bot_hp}",
+            f"Раундов сыграно: {len(history)}   |   HP игрока: {self.player_hp}   |   Ботов живых: {living_bots}/7",
             True, (200, 200, 200))
         r = summary_surf.get_rect(center=(self.width // 2, self.height // 2 + 50))
         self.screen.blit(summary_surf, r)
@@ -3379,7 +4322,7 @@ class GameUI:
                     try:
                         merged = draft1.buy_unit(player1, name)
                         purchased1.append(merged)
-                    except Exception:
+                    except ShopError:
                         pass
             gold1 = player1.gold
 
@@ -3401,7 +4344,7 @@ class GameUI:
                     try:
                         merged = draft2.buy_unit(player2, name)
                         purchased2.append(merged)
-                    except Exception:
+                    except ShopError:
                         pass
             gold2 = player2.gold
 
@@ -3409,18 +4352,14 @@ class GameUI:
             def make_battle_units(purchased, all_units):
                 units = []
                 for pu in purchased[:6]:
-                    name = pu.split("★")[0]
+                    name = base_name(pu)
                     if name in all_units:
                         ud = all_units[name]
-                        star = 1
-                        if "★" in pu:
-                            star = int(pu.split("★")[1][1:])
-                        hp_mult = 1.5 if star == 2 else 2.0 if star == 3 else 1.0
-                        dmg_mult = 1.5 if star == 2 else 2.0 if star == 3 else 1.0
+                        mult = star_multiplier(star_level(pu))
                         eu = {
                             "name": name,
-                            "hp": int(ud["hp"] * hp_mult),
-                            "damage": int(ud["damage"] * dmg_mult),
+                            "hp": int(ud["hp"] * mult),
+                            "damage": int(ud["damage"] * mult),
                             "attack_speed": ud["attack_speed"],
                             "range_": ud["range"],
                             "class": ud["class"],
@@ -3599,20 +4538,21 @@ class GameUI:
             
             events = pygame.event.get()
 
-            # Если нет фокуса — активируем окно
-            if not pygame.display.get_active():
-                try:
-                    pygame.display.set_mode((self.width, self.height), pygame.SRCALPHA)
-                except Exception:
-                    pass
-            
             for event in events:
                 if event.type == pygame.QUIT:
                     return False
                 elif event.type == pygame.KEYDOWN:
                     key = event.key
-                    if key == pygame.K_ESCAPE:
-                        return False
+                    if key == KEY_LEADERBOARD:
+                        self.leaderboard_open = not self.leaderboard_open
+                        self.viewing_board = None
+                    elif key == pygame.K_ESCAPE:
+                        if self.leaderboard_open:
+                            self.leaderboard_open = False
+                        elif self.viewing_board is not None:
+                            self.viewing_board = None
+                        else:
+                            return False
                     elif key == pygame.K_SPACE:
                         paused = not paused
                     elif key in (pygame.K_PLUS, pygame.K_EQUALS,
@@ -3622,6 +4562,15 @@ class GameUI:
                     elif key in (pygame.K_MINUS, getattr(pygame, 'K_KP_MINUS', None)):
                         self.ticks_per_frame = max(1, self.ticks_per_frame - 1)
                         self.speed_display_timer = 60  # показывать 2 секунды
+
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    mx, my = event.pos
+                    clicked_participant = self.handle_player_list_click(mx, my)
+                    if self.viewing_board is not None and not clicked_participant:
+                        if getattr(self, "board_close_rect", None) and self.board_close_rect.collidepoint(mx, my):
+                            self.viewing_board = None
+                        elif getattr(self, "board_view_rect", None) and not self.board_view_rect.collidepoint(mx, my):
+                            self.viewing_board = None
             
             if paused:
                 self.clock.tick(30)
@@ -3684,6 +4633,17 @@ class GameUI:
                                     width=1, border_radius=4)
                     self.screen.blit(badge_surf, badge_rect)
             
+            # ── Панель участников (всегда видима в бою) ──
+            participants = self._gather_participants()
+            self.draw_player_list_panel(participants)
+            # Модальные оверлеи поверх боя
+            if self.leaderboard_open:
+                self.draw_leaderboard(participants)
+            elif self.viewing_board is not None:
+                view = self._find_participant(participants)
+                if view is not None:
+                    self.draw_board_view(view)
+
             pygame.display.flip()
             
             # Process 1 tick per frame for visible battle animation
@@ -3705,6 +4665,17 @@ class GameUI:
                     {"damage_numbers": [], "death_effects": [], "lines": []},
                     total_ticks_final,
                 )
+                
+                # ── Панель участников (всегда видима в бою) ──
+                participants = self._gather_participants()
+                self.draw_player_list_panel(participants)
+                # Модальные оверлеи поверх экрана завершения раунда
+                if self.leaderboard_open:
+                    self.draw_leaderboard(participants)
+                elif self.viewing_board is not None:
+                    view = self._find_participant(participants)
+                    if view is not None:
+                        self.draw_board_view(view)
                 
                 winner = state["battle_result"]["winner"]
                 ticks = state["battle_result"].get("ticks", "?")

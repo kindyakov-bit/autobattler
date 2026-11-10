@@ -42,6 +42,8 @@ node_modules/
 # Debug logs
 debug_log.txt
 debug_output.txt
+full_suite.txt
+review_regressions.txt
 
 # Scratch
 _scratch/

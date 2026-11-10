@@ -85,7 +85,8 @@ _UNIT_TO_FILE = {
     "demon_assassin_shadow_killer": "demon_shadow_killer.png",
     "elf_assassin_shadow_walker": "elf_shadow_walker.png",
     "undead_assassin_death_stalker": "undead_death_stalker.png",
-    # Новые тир 1
+    # Новые тир 1 (демоны-воины, добавлены в баланс-батче)
+    "demon_warrior_imp_guard": "demon_warrior_imp_guard.png",
     "orc_healer_witch": "orc_healer_witch.png",
     "elf_healer_spirit": "elf_healer_spirit.png",
     "undead_bone_shaman": "undead_bone_shaman.png",
@@ -105,6 +106,7 @@ _UNIT_TO_FILE = {
     # Новые тир 3
     "orc_warrior_axe_bearer": "orc_warrior_axe_bearer.png",
     "undead_warrior_bone_guard": "undead_warrior_bone_guard.png",
+    "demon_warrior_pit_lord": "demon_warrior_pit_lord.png",
     "demon_archer_fire_bow": "demon_archer_fire_bow.png",
     "undead_archer_bone_bow": "undead_archer_bone_bow.png",
     "human_assassin_dark_blade": "human_assassin_dark_blade.png",
@@ -179,15 +181,20 @@ def _load_sprite(unit_class: str, unit_key: str | None = None) -> pygame.Surface
     print(f"[DEBUG] Loading sprite: {path}", flush=True)
     try:
         surf = pygame.image.load(str(path))
+        # convert_alpha()/convert() требуют активного дисплея (set_mode);
+        # в headless без окна они падают — используем поверхность как есть.
         try:
             surf = surf.convert_alpha()
         except Exception:
-            surf = surf.convert()
+            try:
+                surf = surf.convert()
+            except Exception:
+                pass
         _SPRITE_CACHE[cache_key] = surf
         print(f"[DEBUG] Sprite loaded: {path}", flush=True)
         return surf
     except (pygame.error, FileNotFoundError, Exception) as e:
-        print("ВНИМАНИЕ: Спрайт не найден:", cache_key, "(", path, ")", flush=True)
+        print("ВНИМАНИЕ: Спрайт не найден:", cache_key, "(", path, ")", e, flush=True)
         _SPRITE_CACHE[cache_key] = None
         return None
 

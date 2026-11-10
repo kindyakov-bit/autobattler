@@ -1,5 +1,10 @@
 """Состояние игрока: золото, bench, board, управление юнитами, уровень и опыт."""
 
+from game.core.unit_name import star_level
+
+#: Максимум юнитов на скамейке. Единый источник для ядра и UI (BENCH_MAX).
+BENCH_MAX = 9
+
 
 class Player:
     """Игрок: золото, резерв (bench), доска (board), инвентарь предметов, уровень и опыт."""
@@ -32,7 +37,7 @@ class Player:
         self.reserve: list[str] = []       # bench — купленные юниты
         self.board: list[dict] = []         # на доске — {'name': str, 'star': int, ...}
         self.items: list[dict] = []         # инвентарь предметов
-        self.max_bench = 20                 # макс. размер банка (соответствует BENCH_MAX в ui/game_ui.py)
+        self.max_bench = BENCH_MAX          # макс. размер скамейки (единый источник — BENCH_MAX выше)
         self.level = 1                      # уровень игрока (1..10)
         self.xp = 0                         # текущий опыт
         self.xp_to_next_level = self.XP_TABLE[1]  # опыта нужно до следующего уровня
@@ -112,10 +117,10 @@ class Player:
         """Положить юнита из резерва на доску."""
         if name not in self.reserve:
             raise ValueError(f"{name} not in reserve")
-        self.reserve.remove(name)
         if len(self.board) >= self.max_board:
             raise ValueError(f"board full ({self.max_board})")
-        unit = {"name": name, "star": 1 if "★" not in name else int(name.split("★")[1][1:]), "_base_hp": 0}
+        self.reserve.remove(name)
+        unit = {"name": name, "star": star_level(name), "_base_hp": 0}
         self.board.append(unit)
         return unit
 
@@ -123,6 +128,8 @@ class Player:
         """Убрать юнита с доски обратно в резерв."""
         if idx < 0 or idx >= len(self.board):
             raise ValueError(f"Invalid board index {idx}")
+        if len(self.reserve) >= self.max_bench:
+            raise ValueError(f"bench full ({self.max_bench})")
         unit = self.board.pop(idx)
         self.reserve.append(unit["name"])
         return unit

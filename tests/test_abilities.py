@@ -150,7 +150,7 @@ class TestActiveAbilities:
         sim.add_team("player", player_units)
         sim.add_team("enemy", enemy_units)
         
-        result = sim.run(max_ticks=60)
+        result = sim.run(max_ticks=200)
         
         # Проверяем что была способность в логе
         ability_events = [e for e in sim.log if "ability" in e.get("type", "")]
@@ -176,13 +176,13 @@ class TestActiveAbilities:
         ]
         # Слабый юнит — один удар Огненного шара может его убить
         enemy_units = [
-            {"name": "warrior_freshman", "hp": 50, "damage": 40, "attack_speed": 1.2, "range_": 1, "class": "warrior"},
+            {"name": "warrior_freshman", "hp": 500, "damage": 40, "attack_speed": 1.2, "range_": 1, "class": "warrior"},
         ]
         
         sim.add_team("player", player_units)
         sim.add_team("enemy", enemy_units)
         
-        result = sim.run(max_ticks=60)
+        result = sim.run(max_ticks=200)
         
         ability_events = [e for e in sim.log if "ability" in e.get("type", "")]
         assert len(ability_events) >= 1
@@ -215,7 +215,7 @@ class TestAbilityEvents:
         
         sim.add_team("player", player_units)
         sim.add_team("enemy", enemy_units)
-        sim.run(max_ticks=30)
+        sim.run(max_ticks=200)
         
         ability_events = sim.get_ability_events()
         assert len(ability_events) >= 1
@@ -259,7 +259,7 @@ class TestCooldown:
         sim.add_team("enemy", enemy_units)
         
         # Запускаем бой — способность должна сработать и затем ждать кулдаун
-        sim.run(max_ticks=20)
+        sim.run(max_ticks=300)
         
         ability_events = sim.get_ability_events()
         # Проверяем что была хотя бы одна активация

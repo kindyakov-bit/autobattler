@@ -231,13 +231,3 @@ def create_bot(preset: str = "balanced", seed: int = None) -> SimpleBot:
         difficulty=config["difficulty"],
         seed=seed,
     )
-
-
-def create_bot(preset: str = "balanced", seed: int = None) -> SimpleBot:
-    """Create a bot from preset."""
-    config = BOT_PRESETS.get(preset, BOT_PRESETS["balanced"])
-    return SimpleBot(
-        name=config["name"],
-        difficulty=config["difficulty"],
-        seed=seed,
-    )
