@@ -2,87 +2,294 @@
   "synergies": {
     "warrior": {
       "name": "Воин",
-      "thresholds": [2, 4],
-      "bonuses": {"2": {"hp_bonus_pct": 15}, "4": {"hp_bonus_pct": 30}}
+      "thresholds": [
+        2,
+        4
+      ],
+      "bonuses": {
+        "2": {
+          "hp_bonus_pct": 15
+        },
+        "4": {
+          "hp_bonus_pct": 30
+        }
+      }
     },
     "mage": {
       "name": "Маг",
-      "thresholds": [2, 4],
-      "bonuses": {"2": {"mana_per_kill": 5}, "4": {"mana_per_kill": 10}}
+      "thresholds": [
+        2,
+        4
+      ],
+      "bonuses": {
+        "2": {
+          "mana_per_kill": 5
+        },
+        "4": {
+          "mana_per_kill": 10
+        }
+      }
     },
     "archer": {
       "name": "Стрелок",
-      "thresholds": [2, 4],
-      "bonuses": {"2": {"attack_speed_pct": 15}, "4": {"attack_speed_pct": 30}}
+      "thresholds": [
+        2,
+        4
+      ],
+      "bonuses": {
+        "2": {
+          "attack_speed_pct": 15
+        },
+        "4": {
+          "attack_speed_pct": 30
+        }
+      }
     },
     "healer": {
       "name": "Целитель",
-      "thresholds": [2, 4],
-      "bonuses": {"2": {"hp_bonus_pct": 10}, "4": {"hp_bonus_pct": 20}}
+      "thresholds": [
+        2,
+        4
+      ],
+      "bonuses": {
+        "2": {
+          "hp_bonus_pct": 10
+        },
+        "4": {
+          "hp_bonus_pct": 20
+        }
+      }
     },
     "buffer": {
       "name": "Баффер",
-      "thresholds": [2, 4],
-      "bonuses": {"2": {"attack_speed_pct": 10}, "4": {"attack_speed_pct": 20}}
+      "thresholds": [
+        2,
+        4
+      ],
+      "bonuses": {
+        "2": {
+          "attack_speed_pct": 10
+        },
+        "4": {
+          "attack_speed_pct": 20
+        }
+      }
     },
     "assassin": {
       "name": "Убийца",
-      "thresholds": [2, 4],
-      "bonuses": {"2": {"crit_chance_bonus": 10}, "4": {"crit_chance_bonus": 25}}
+      "thresholds": [
+        2,
+        4
+      ],
+      "bonuses": {
+        "2": {
+          "crit_chance_bonus": 10
+        },
+        "4": {
+          "crit_chance_bonus": 25
+        }
+      }
     }
   },
   "races": {
     "human": {
       "name": "Люди",
-      "desc": "Универсалы. Небольшой бонус к золоту.",
-      "bonuses": {"gold_bonus_pct": 5}
+      "desc": "Универсалы. Бонус к золоту и Единство (сила за разнообразие классов).",
+      "bonuses": {
+        "gold_bonus_pct": 10
+      }
     },
     "orc": {
       "name": "Орки",
       "desc": "Силовые야рость. Бонус к урону и HP.",
-      "bonuses": {"damage_bonus_pct": 10, "hp_bonus_pct": 5}
+      "bonuses": {
+        "damage_bonus_pct": 5,
+        "hp_bonus_pct": 5
+      }
     },
     "demon": {
       "name": "Демоны",
       "desc": "Огонь и криты. Бонус к шансу и урону крита.",
-      "bonuses": {"crit_chance_bonus": 5, "crit_damage_bonus_pct": 15}
+      "bonuses": {
+        "crit_chance_bonus": 5,
+        "crit_damage_bonus_pct": 15,
+        "hp_regen_pct": 0.1,
+        "damage_reduction_pct": 5,
+        "damage_bonus_pct": 10
+      }
     },
     "elf": {
       "name": "Эльфы",
       "desc": "Ловкость и скорость. Бонус к скорости атаки.",
-      "bonuses": {"attack_speed_pct": 10}
+      "bonuses": {
+        "attack_speed_pct": 5
+      }
     },
     "undead": {
       "name": "Нежить",
       "desc": "Регенерация и стойкость. Бонус к снижению урона и регену HP.",
-      "bonuses": {"damage_reduction_pct": 5, "hp_regen_pct": 2}
+      "bonuses": {
+        "damage_reduction_pct": 5
+      }
     }
   },
   "race_synergies": {
     "human": {
       "name": "Человечество",
-      "thresholds": [2, 4],
-      "bonuses": {"2": {"gold_bonus_pct": 5}, "4": {"gold_bonus_pct": 15}}
+      "thresholds": [
+        2,
+        4,
+        6
+      ],
+      "bonuses": {
+        "2": {
+          "gold_bonus_pct": 10,
+          "unity_damage_pct": 5,
+          "unity_hp_pct": 5
+        },
+        "4": {
+          "gold_bonus_pct": 15,
+          "unity_damage_pct": 8,
+          "unity_hp_pct": 8
+        },
+        "6": {
+          "gold_bonus_pct": 20,
+          "unity_damage_pct": 12,
+          "unity_hp_pct": 12
+        }
+      }
     },
     "orc": {
       "name": "Орда",
-      "thresholds": [2, 4],
-      "bonuses": {"2": {"damage_bonus_pct": 10}, "4": {"damage_bonus_pct": 25}}
+      "thresholds": [
+        2,
+        4,
+        6
+      ],
+      "bonuses": {
+        "2": {
+          "damage_bonus_pct": 10,
+          "berserker": {
+            "hp_thresholds": [
+              50
+            ],
+            "damage_pct": [
+              15
+            ],
+            "speed_pct": [
+              15
+            ]
+          }
+        },
+        "4": {
+          "damage_bonus_pct": 12,
+          "berserker": {
+            "hp_thresholds": [
+              50,
+              25
+            ],
+            "damage_pct": [
+              20,
+              35
+            ],
+            "speed_pct": [
+              20,
+              35
+            ]
+          }
+        },
+        "6": {
+          "berserker": {
+            "hp_thresholds": [
+              50,
+              25
+            ],
+            "damage_pct": [
+              30,
+              50
+            ],
+            "speed_pct": [
+              25,
+              45
+            ]
+          }
+        }
+      }
     },
     "demon": {
       "name": "Племя Ада",
-      "thresholds": [2, 4],
-      "bonuses": {"2": {"crit_chance_bonus": 10}, "4": {"crit_chance_bonus": 25}}
+      "thresholds": [
+        2,
+        4,
+        6
+      ],
+      "bonuses": {
+        "2": {
+          "crit_chance_bonus": 10,
+          "lifesteal_pct": 12
+        },
+        "4": {
+          "crit_chance_bonus": 25,
+          "damage_bonus_pct": 12,
+          "lifesteal_pct": 20
+        },
+        "6": {
+          "lifesteal_pct": 30
+        }
+      }
     },
     "elf": {
       "name": "Лесники",
-      "thresholds": [2, 4],
-      "bonuses": {"2": {"attack_speed_pct": 10}, "4": {"attack_speed_pct": 20}}
+      "thresholds": [
+        2,
+        4,
+        6
+      ],
+      "bonuses": {
+        "2": {
+          "evasion_pct": 12
+        },
+        "4": {
+          "evasion_pct": 20
+        },
+        "6": {
+          "evasion_pct": 30
+        }
+      }
     },
     "undead": {
       "name": "Армия Смерти",
-      "thresholds": [2, 4],
-      "bonuses": {"2": {"damage_reduction_pct": 10}, "4": {"damage_reduction_pct": 20}}
+      "thresholds": [
+        2,
+        4,
+        6
+      ],
+      "bonuses": {
+        "2": {
+          "damage_reduction_pct": 6,
+          "hp_regen_pct": 0.02,
+          "revive": {
+            "hp_pct": 15,
+            "max_revives": 1
+          }
+        },
+        "4": {
+          "damage_reduction_pct": 8,
+          "hp_regen_pct": 0.02,
+          "revive": {
+            "hp_pct": 20,
+            "max_revives": 1
+          }
+        },
+        "6": {
+          "damage_reduction_pct": 10,
+          "hp_regen_pct": 0.02,
+          "revive": {
+            "hp_pct": 25,
+            "max_revives": 2
+          }
+        }
+      }
     }
   },
   "units": {
@@ -91,8 +298,8 @@
       "cost": 1,
       "class": "warrior",
       "race": "human",
-      "hp": 500,
-      "damage": 80,
+      "hp": 400,
+      "damage": 41,
       "attack_speed": 1.2,
       "range": 1,
       "crit_chance": 10,
@@ -102,17 +309,28 @@
         "desc": "+10% HP за каждого союзного воина",
         "type": "synergy_buff",
         "class": "warrior",
-        "effect": {"hp_bonus_pct_per_ally": 10}
+        "effect": {
+          "hp_bonus_pct_per_ally": 10
+        }
       },
-      "active": null
+      "active": {
+        "name": "Стойка новобранца",
+        "type": "shield",
+        "cooldown": 0.8,
+        "effect": {
+          "shield": 60,
+          "duration": 2.0,
+          "targets": "self"
+        }
+      }
     },
     "warrior_veteran": {
       "name": "Ветеран",
       "cost": 2,
       "class": "warrior",
       "race": "human",
-      "hp": 700,
-      "damage": 110,
+      "hp": 562,
+      "damage": 60,
       "attack_speed": 1.0,
       "range": 1,
       "crit_chance": 10,
@@ -122,34 +340,49 @@
         "desc": "+15% HP за каждого союзного воина",
         "type": "synergy_buff",
         "class": "warrior",
-        "effect": {"hp_bonus_pct_per_ally": 15}
+        "effect": {
+          "hp_bonus_pct_per_ally": 15
+        }
       },
-      "active": null
+      "active": {
+        "name": "Провокация",
+        "type": "taunt",
+        "cooldown": 1.0,
+        "effect": {
+          "duration": 2.0,
+          "radius": 2
+        }
+      }
     },
     "warrior_champion": {
       "name": "Чемпион",
       "cost": 3,
       "class": "warrior",
       "race": "human",
-      "hp": 900,
-      "damage": 150,
+      "hp": 750,
+      "damage": 82,
       "attack_speed": 0.9,
       "range": 1,
       "crit_chance": 10,
       "description": "Элитный воин ближнего боя.",
       "passive": {
-        "name": "Боевой клич",
-        "desc": "+20% HP за каждого союзного воина",
+        "name": "Братство стали",
+        "desc": "+13% за союзника своего класса",
         "type": "synergy_buff",
         "class": "warrior",
-        "effect": {"hp_bonus_pct_per_ally": 20}
+        "effect": {
+          "hp_bonus_pct_per_ally": 13
+        }
       },
       "active": {
-        "name": "Боевой клич",
-        "desc": "Даёт +5 к урону за каждого союзного воина на 6 тиков",
-        "type": "aura",
-        "cooldown": 30,
-        "effect": {"bonus_damage_per_ally": 5, "duration": 25}
+        "name": "Щит чемпиона",
+        "type": "shield",
+        "cooldown": 1.0,
+        "effect": {
+          "shield": 140,
+          "duration": 2.0,
+          "targets": "self"
+        }
       }
     },
     "warrior_knight": {
@@ -157,25 +390,29 @@
       "cost": 5,
       "class": "warrior",
       "race": "human",
-      "hp": 900,
-      "damage": 190,
+      "hp": 1188,
+      "damage": 142,
       "attack_speed": 0.8,
       "range": 1,
       "crit_chance": 10,
       "description": "Тяжёлый рыцарь — танк команды.",
       "passive": {
-        "name": "Несокрушимость",
-        "desc": "+25% HP за каждого союзного воина",
+        "name": "Братство стали",
+        "desc": "+15% за союзника своего класса",
         "type": "synergy_buff",
         "class": "warrior",
-        "effect": {"hp_bonus_pct_per_ally": 25}
+        "effect": {
+          "hp_bonus_pct_per_ally": 15
+        }
       },
       "active": {
         "name": "Щитовая стена",
-        "desc": "Снижает входящий урон на 30% всем союзникам на 20 тиков",
-        "type": "buff_allies",
-        "cooldown": 30,
-        "effect": {"damage_reduction_pct": 30, "duration": 15}
+        "type": "taunt",
+        "cooldown": 1.0,
+        "effect": {
+          "duration": 2.0,
+          "radius": 3
+        }
       }
     },
     "mage_acolyte": {
@@ -183,8 +420,8 @@
       "cost": 1,
       "class": "mage",
       "race": "human",
-      "hp": 300,
-      "damage": 130,
+      "hp": 256,
+      "damage": 69,
       "attack_speed": 1.0,
       "range": 4,
       "crit_chance": 10,
@@ -194,34 +431,49 @@
         "desc": "+10% урона за каждого союзного мага",
         "type": "synergy_buff",
         "class": "mage",
-        "effect": {"damage_bonus_pct_per_ally": 10}
+        "effect": {
+          "damage_bonus_pct_per_ally": 10
+        }
       },
-      "active": null
+      "active": {
+        "name": "Искра",
+        "type": "aoe_damage",
+        "cooldown": 0.8,
+        "effect": {
+          "damage": 50,
+          "radius": 1
+        }
+      }
     },
     "mage_sorcerer": {
       "name": "Маг-чародей",
       "cost": 2,
       "class": "mage",
       "race": "human",
-      "hp": 350,
-      "damage": 170,
+      "hp": 360,
+      "damage": 100,
       "attack_speed": 0.9,
       "range": 4,
       "crit_chance": 10,
       "description": "Сильный маг с высоким уроном.",
       "passive": {
-        "name": "Усиление магии",
-        "desc": "+15% урона за каждого союзного мага",
+        "name": "Тайна стихий",
+        "desc": "+12% за союзника своего класса",
         "type": "synergy_buff",
         "class": "mage",
-        "effect": {"damage_bonus_pct_per_ally": 15}
+        "effect": {
+          "damage_bonus_pct_per_ally": 12
+        }
       },
       "active": {
-        "name": "Огненный шар",
-        "desc": "Наносит 80 урона всем врагам в радиусе 2",
-        "type": "aoe_damage",
-        "cooldown": 30,
-        "effect": {"damage": 80, "radius": 2}
+        "name": "Ожог",
+        "type": "dot",
+        "cooldown": 0.8,
+        "effect": {
+          "damage_per_tick": 12,
+          "duration": 2.0,
+          "radius": 1
+        }
       }
     },
     "mage_archmage": {
@@ -229,8 +481,8 @@
       "cost": 3,
       "class": "mage",
       "race": "human",
-      "hp": 400,
-      "damage": 240,
+      "hp": 480,
+      "damage": 138,
       "attack_speed": 0.8,
       "range": 5,
       "crit_chance": 10,
@@ -240,14 +492,20 @@
         "desc": "+20% урона за каждого союзного мага",
         "type": "synergy_buff",
         "class": "mage",
-        "effect": {"damage_bonus_pct_per_ally": 20}
+        "effect": {
+          "damage_bonus_pct_per_ally": 20
+        }
       },
       "active": {
-        "name": "Метеор",
-        "desc": "Наносит 150 урона всем врагам (огромный радиус)",
-        "type": "aoe_damage",
-        "cooldown": 40,
-        "effect": {"damage": 150, "radius": 3}
+        "name": "Ледяная нова",
+        "type": "aoe_damage_slow",
+        "cooldown": 1.0,
+        "effect": {
+          "damage": 90,
+          "radius": 2,
+          "slow_pct": 30,
+          "slow_duration": 8
+        }
       }
     },
     "mage_sage": {
@@ -255,29 +513,28 @@
       "cost": 5,
       "class": "mage",
       "race": "human",
-      "hp": 450,
-      "damage": 320,
+      "hp": 760,
+      "damage": 238,
       "attack_speed": 0.7,
       "range": 6,
       "crit_chance": 10,
       "description": "Легендарный маг — самый высокий урон.",
       "passive": {
-        "name": "Вечная мудрость",
-        "desc": "+25% урона за каждого союзного мага",
+        "name": "Тайна стихий",
+        "desc": "+15% за союзника своего класса",
         "type": "synergy_buff",
         "class": "mage",
-        "effect": {"damage_bonus_pct_per_ally": 25}
+        "effect": {
+          "damage_bonus_pct_per_ally": 15
+        }
       },
       "active": {
-        "name": "Волна разрушения",
-        "desc": "Наносит 200 урона всем врагам и замедляет их на 30% на 10 тиков",
-        "type": "aoe_damage_slow",
-        "cooldown": 45,
+        "name": "Метеор",
+        "type": "aoe_damage",
+        "cooldown": 1.0,
         "effect": {
           "damage": 200,
-          "radius": 3,
-          "slow_pct": 30,
-          "slow_duration": 5
+          "radius": 2
         }
       }
     },
@@ -286,8 +543,8 @@
       "cost": 1,
       "class": "archer",
       "race": "human",
-      "hp": 250,
-      "damage": 90,
+      "hp": 272,
+      "damage": 66,
       "attack_speed": 1.5,
       "range": 3,
       "crit_chance": 15,
@@ -297,34 +554,48 @@
         "desc": "+10% скорости атаки за каждого союзного стрелка",
         "type": "synergy_buff",
         "class": "archer",
-        "effect": {"speed_bonus_pct_per_ally": 10}
+        "effect": {
+          "speed_bonus_pct_per_ally": 10
+        }
       },
-      "active": null
+      "active": {
+        "name": "Прицельный выстрел",
+        "type": "buff_next_attack",
+        "cooldown": 0.8,
+        "effect": {
+          "bonus_damage": 40,
+          "radius": 1,
+          "duration": 2.5
+        }
+      }
     },
     "archer_ranger": {
       "name": "Следопыт",
       "cost": 2,
       "class": "archer",
       "race": "human",
-      "hp": 300,
-      "damage": 130,
+      "hp": 382,
+      "damage": 96,
       "attack_speed": 1.4,
       "range": 3,
       "crit_chance": 15,
       "description": "Опытный стрелок с хорошим уроном.",
       "passive": {
-        "name": "Следящий глаз",
-        "desc": "+15% скорости атаки за каждого союзного стрелка",
+        "name": "Точный расчёт",
+        "desc": "+12% за союзника своего класса",
         "type": "synergy_buff",
         "class": "archer",
-        "effect": {"speed_bonus_pct_per_ally": 15}
+        "effect": {
+          "damage_bonus_pct_per_ally": 12
+        }
       },
       "active": {
-        "name": "Огненные стрелы",
-        "desc": "Следующая атака наносит +50 урона и бьёт до 3 врагов с переднего края",
-        "type": "buff_next_attack",
-        "cooldown": 15,
-        "effect": {"bonus_damage": 50, "radius": 2, "duration": 12}
+        "name": "Меткий выстрел",
+        "type": "single_target_critical",
+        "cooldown": 0.8,
+        "effect": {
+          "damage": 90
+        }
       }
     },
     "archer_marksman": {
@@ -332,25 +603,30 @@
       "cost": 3,
       "class": "archer",
       "race": "human",
-      "hp": 280,
-      "damage": 190,
+      "hp": 510,
+      "damage": 132,
       "attack_speed": 1.2,
       "range": 5,
       "crit_chance": 20,
       "description": "Дальнобойный снайпер.",
       "passive": {
-        "name": "Меткий глаз",
-        "desc": "+20% скорости атаки за каждого союзного стрелка",
+        "name": "Точный расчёт",
+        "desc": "+13% за союзника своего класса",
         "type": "synergy_buff",
         "class": "archer",
-        "effect": {"speed_bonus_pct_per_ally": 20}
+        "effect": {
+          "damage_bonus_pct_per_ally": 13
+        }
       },
       "active": {
-        "name": "Выстрел смерти",
-        "desc": "Наносит 100 урона самому слабому врагу (гарантированный крит)",
-        "type": "single_target_critical",
-        "cooldown": 25,
-        "effect": {"damage": 100}
+        "name": "Снайпер",
+        "type": "execute",
+        "cooldown": 0.8,
+        "effect": {
+          "damage": 110,
+          "execute_threshold_pct": 35,
+          "bonus_vs_low_pct": 60
+        }
       }
     },
     "archer_battleheart": {
@@ -358,29 +634,28 @@
       "cost": 5,
       "class": "archer",
       "race": "human",
-      "hp": 350,
-      "damage": 280,
+      "hp": 808,
+      "damage": 228,
       "attack_speed": 1.6,
       "range": 4,
       "crit_chance": 15,
       "description": "Легендарный стрелок — высокий урон и скорость.",
       "passive": {
-        "name": "Сердце воина",
-        "desc": "+25% скорости атаки за каждого союзного стрелка",
+        "name": "Точный расчёт",
+        "desc": "+15% за союзника своего класса",
         "type": "synergy_buff",
         "class": "archer",
-        "effect": {"speed_bonus_pct_per_ally": 25}
+        "effect": {
+          "damage_bonus_pct_per_ally": 15
+        }
       },
       "active": {
-        "name": "Дождь из стрел",
-        "desc": "Наносит 180 урона всем врагам в радиусе 2, +20% скорости атаки на 20 тиков",
-        "type": "aoe_damage_buff",
-        "cooldown": 20,
+        "name": "Залп",
+        "type": "aoe_damage",
+        "cooldown": 0.8,
         "effect": {
-          "damage": 180,
-          "radius": 2,
-          "speed_bonus_pct": 20,
-          "speed_bonus_duration": 10
+          "damage": 160,
+          "radius": 2
         }
       }
     },
@@ -389,21 +664,31 @@
       "cost": 2,
       "class": "warrior",
       "race": "orc",
-      "hp": 600,
-      "damage": 140,
+      "hp": 562,
+      "damage": 60,
       "attack_speed": 1.3,
       "range": 1,
       "crit_chance": 15,
       "description": "Орк-берсерк — безумие в битве.",
       "passive": {
-        "name": "Ярость орка",
-        "desc": "+15% урона за каждого союзного орка",
+        "name": "Братство стали",
+        "desc": "+12% за союзника своего класса",
         "type": "synergy_buff",
         "class": "warrior",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 15}
+        "effect": {
+          "hp_bonus_pct_per_ally": 12
+        }
       },
-      "active": null
+      "active": {
+        "name": "Ярость",
+        "type": "buff_next_attack",
+        "cooldown": 0.8,
+        "effect": {
+          "bonus_damage": 70,
+          "radius": 1,
+          "duration": 2.5
+        }
+      }
     },
     "orc_warrior_chief": {
       "name": "Вождь орков",
@@ -411,25 +696,28 @@
       "class": "warrior",
       "race": "orc",
       "hp": 950,
-      "damage": 210,
+      "damage": 109,
       "attack_speed": 1.0,
       "range": 1,
       "crit_chance": 15,
       "description": "Вождь оркской орды.",
       "passive": {
-        "name": "Главарь",
-        "desc": "+20% HP за каждого союзного орка",
+        "name": "Братство стали",
+        "desc": "+14% за союзника своего класса",
         "type": "synergy_buff",
         "class": "warrior",
-        "count_by": "race",
-        "effect": {"hp_bonus_pct_per_ally": 20}
+        "effect": {
+          "hp_bonus_pct_per_ally": 14
+        }
       },
       "active": {
         "name": "Крик войны",
-        "desc": "+30% урона всем союзникам на 15 тиков",
         "type": "buff_allies",
-        "cooldown": 25,
-        "effect": {"damage_bonus_pct": 30, "duration": 15}
+        "cooldown": 1.0,
+        "effect": {
+          "damage_bonus_pct": 25,
+          "duration": 2.5
+        }
       }
     },
     "demon_mage_imp": {
@@ -437,47 +725,61 @@
       "cost": 1,
       "class": "mage",
       "race": "demon",
-      "hp": 250,
-      "damage": 110,
+      "hp": 256,
+      "damage": 69,
       "attack_speed": 1.4,
       "range": 3,
       "crit_chance": 15,
       "description": "Маленький демон с огненной магией.",
       "passive": {
-        "name": "Огненная кровь",
-        "desc": "+10% урона за каждого союзного демона",
+        "name": "Тайна стихий",
+        "desc": "+11% за союзника своего класса",
         "type": "synergy_buff",
         "class": "mage",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 10}
+        "effect": {
+          "damage_bonus_pct_per_ally": 11
+        }
       },
-      "active": null
+      "active": {
+        "name": "Поджог",
+        "type": "dot",
+        "cooldown": 0.8,
+        "effect": {
+          "damage_per_tick": 10,
+          "duration": 2.0,
+          "radius": 1
+        }
+      }
     },
     "demon_mage_succubus": {
       "name": "Суккуб",
       "cost": 3,
       "class": "mage",
       "race": "demon",
-      "hp": 350,
-      "damage": 200,
+      "hp": 480,
+      "damage": 138,
       "attack_speed": 1.1,
       "range": 4,
       "crit_chance": 20,
       "description": "Демонический маг соблазна.",
       "passive": {
-        "name": "Сосуд душ",
-        "desc": "+15% урона за каждого союзного демона",
+        "name": "Тайна стихий",
+        "desc": "+13% за союзника своего класса",
         "type": "synergy_buff",
         "class": "mage",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 15}
+        "effect": {
+          "damage_bonus_pct_per_ally": 13
+        }
       },
       "active": {
         "name": "Проклятие",
-        "desc": "Снижает урон цели на 25% на 10 тиков",
         "type": "buff_next_attack",
-        "cooldown": 20,
-        "effect": {"damage_reduction_pct": 25, "duration": 10}
+        "cooldown": 0.8,
+        "effect": {
+          "bonus_damage": 0,
+          "damage_reduction_pct": 25,
+          "duration": 2.5
+        }
       }
     },
     "elf_archer_ranger": {
@@ -485,46 +787,61 @@
       "cost": 2,
       "class": "archer",
       "race": "elf",
-      "hp": 280,
-      "damage": 140,
-      "attack_speed": 1.6,
+      "hp": 382,
+      "damage": 86,
+      "attack_speed": 1.36,
       "range": 4,
       "crit_chance": 15,
       "description": "Эльф с луком — быстро и точно.",
       "passive": {
-        "name": "Лесной глаз",
-        "desc": "+15% скорости атаки за каждого союзного эльфа",
+        "name": "Точный расчёт",
+        "desc": "+12% за союзника своего класса",
         "type": "synergy_buff",
         "class": "archer",
-        "count_by": "race",
-        "effect": {"speed_bonus_pct_per_ally": 15}
+        "effect": {
+          "damage_bonus_pct_per_ally": 12
+        }
       },
-      "active": null
+      "active": {
+        "name": "Лесная меткость",
+        "type": "buff_next_attack",
+        "cooldown": 0.8,
+        "effect": {
+          "bonus_damage": 60,
+          "radius": 1,
+          "duration": 2.5
+        }
+      }
     },
     "elf_archer_hunter": {
       "name": "Эльф-охотник",
       "cost": 4,
       "class": "archer",
       "race": "elf",
-      "hp": 320,
-      "damage": 260,
-      "attack_speed": 1.4,
+      "hp": 646,
+      "damage": 157,
+      "attack_speed": 1.19,
       "range": 6,
       "crit_chance": 25,
       "description": "Легендарный эльф-охотник.",
       "passive": {
-        "name": "Точность эльфа",
-        "desc": "+20% урона за каждого союзного эльфа",
+        "name": "Точный расчёт",
+        "desc": "+14% за союзника своего класса",
         "type": "synergy_buff",
         "class": "archer",
-        "effect": {"damage_bonus_pct_per_ally": 20}
+        "effect": {
+          "damage_bonus_pct_per_ally": 14
+        }
       },
       "active": {
-        "name": "Выстрел эльфа",
-        "desc": "Наносит 120 урона лучшей цели (гарантированный крит)",
-        "type": "single_target_critical",
-        "cooldown": 20,
-        "effect": {"damage": 120}
+        "name": "Охотничий выстрел",
+        "type": "execute",
+        "cooldown": 0.8,
+        "effect": {
+          "damage": 130,
+          "execute_threshold_pct": 40,
+          "bonus_vs_low_pct": 70
+        }
       }
     },
     "undead_warrior_skeleton": {
@@ -532,47 +849,60 @@
       "cost": 1,
       "class": "warrior",
       "race": "undead",
-      "hp": 300,
-      "damage": 70,
+      "hp": 400,
+      "damage": 41,
       "attack_speed": 1.1,
       "range": 1,
       "crit_chance": 5,
       "description": "Костяной воин нежити.",
       "passive": {
-        "name": "Костяная броня",
-        "desc": "+5% снижения урона за каждого союзного нежити",
+        "name": "Братство стали",
+        "desc": "+11% за союзника своего класса",
         "type": "synergy_buff",
         "class": "warrior",
-        "count_by": "race",
-        "effect": {"damage_reduction_pct_per_ally": 5}
+        "effect": {
+          "hp_bonus_pct_per_ally": 11
+        }
       },
-      "active": null
+      "active": {
+        "name": "Костяная броня",
+        "type": "shield",
+        "cooldown": 0.8,
+        "effect": {
+          "shield": 60,
+          "duration": 2.0,
+          "targets": "self"
+        }
+      }
     },
     "undead_warrior_lich": {
       "name": "Лич",
       "cost": 4,
       "class": "mage",
       "race": "undead",
-      "hp": 400,
-      "damage": 220,
+      "hp": 608,
+      "damage": 181,
       "attack_speed": 0.9,
       "range": 5,
       "crit_chance": 15,
       "description": "Мощный нежить-маг.",
       "passive": {
-        "name": "Холод смерти",
-        "desc": "+15% урона за каждого союзного нежити",
+        "name": "Тайна стихий",
+        "desc": "+14% за союзника своего класса",
         "type": "synergy_buff",
         "class": "mage",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 15}
+        "effect": {
+          "damage_bonus_pct_per_ally": 14
+        }
       },
       "active": {
         "name": "Касание смерти",
-        "desc": "Наносит 100 урона и лечит себя на 50% от урона",
         "type": "single_target_critical",
-        "cooldown": 25,
-        "effect": {"damage": 100, "heal_pct": 50}
+        "cooldown": 0.8,
+        "effect": {
+          "damage": 140,
+          "heal_pct": 50
+        }
       }
     },
     "human_healer_priest": {
@@ -580,25 +910,30 @@
       "cost": 2,
       "class": "healer",
       "race": "human",
-      "hp": 350,
-      "damage": 40,
+      "hp": 450,
+      "damage": 48,
       "attack_speed": 0.9,
       "range": 3,
       "crit_chance": 5,
       "description": "Человеческий целитель, лечит самого раненого союзника.",
       "passive": {
-        "name": "Благословение света",
-        "desc": "+10% HP за каждого союзного целителя",
+        "name": "Целительная рука",
+        "desc": "+10% за союзника своего класса",
         "type": "synergy_buff",
         "class": "healer",
-        "effect": {"hp_bonus_pct_per_ally": 10}
+        "effect": {
+          "speed_bonus_pct_per_ally": 10
+        }
       },
       "active": {
-        "name": "Целебная молитва",
-        "desc": "Лечит союзника с наименьшим HP на 80",
-        "type": "heal",
-        "cooldown": 20,
-        "effect": {"heal": 80}
+        "name": "Оберег",
+        "type": "shield",
+        "cooldown": 0.8,
+        "effect": {
+          "shield": 60,
+          "duration": 2.0,
+          "targets": "lowest_ally"
+        }
       }
     },
     "orc_healer_shaman": {
@@ -606,25 +941,30 @@
       "cost": 2,
       "class": "healer",
       "race": "orc",
-      "hp": 400,
-      "damage": 60,
+      "hp": 450,
+      "damage": 48,
       "attack_speed": 1.0,
       "range": 3,
       "crit_chance": 10,
       "description": "Оркский шаман, лечит союзников духами предков.",
       "passive": {
-        "name": "Дух предков",
-        "desc": "+15% HP за каждого союзного целителя",
+        "name": "Целительная рука",
+        "desc": "+10% за союзника своего класса",
         "type": "synergy_buff",
         "class": "healer",
-        "effect": {"hp_bonus_pct_per_ally": 15}
+        "effect": {
+          "speed_bonus_pct_per_ally": 10
+        }
       },
       "active": {
-        "name": "Целебный тотем",
-        "desc": "Лечит союзника с наименьшим HP на 100",
-        "type": "heal",
-        "cooldown": 20,
-        "effect": {"heal": 100}
+        "name": "Духовный щит",
+        "type": "shield",
+        "cooldown": 0.8,
+        "effect": {
+          "shield": 80,
+          "duration": 2.0,
+          "targets": "all_allies"
+        }
       }
     },
     "demon_healer_blood_priest": {
@@ -632,26 +972,30 @@
       "cost": 3,
       "class": "healer",
       "race": "demon",
-      "hp": 320,
-      "damage": 90,
+      "hp": 600,
+      "damage": 66,
       "attack_speed": 1.1,
       "range": 3,
       "crit_chance": 15,
       "description": "Демон-целитель, лечит союзников за счёт жизни врагов.",
       "passive": {
-        "name": "Кровавый обряд",
-        "desc": "+10% урона за каждого союзного демона",
+        "name": "Целительная рука",
+        "desc": "+11% за союзника своего класса",
         "type": "synergy_buff",
         "class": "healer",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 10}
+        "effect": {
+          "speed_bonus_pct_per_ally": 11
+        }
       },
       "active": {
-        "name": "Жертвенное исцеление",
-        "desc": "Лечит союзника с наименьшим HP на 120",
-        "type": "heal",
-        "cooldown": 25,
-        "effect": {"heal": 120}
+        "name": "Кровавый барьер",
+        "type": "shield",
+        "cooldown": 0.8,
+        "effect": {
+          "shield": 100,
+          "duration": 2.0,
+          "targets": "self"
+        }
       }
     },
     "elf_healer_dryad": {
@@ -659,26 +1003,30 @@
       "cost": 2,
       "class": "healer",
       "race": "elf",
-      "hp": 300,
-      "damage": 50,
-      "attack_speed": 1.2,
+      "hp": 450,
+      "damage": 43,
+      "attack_speed": 1.02,
       "range": 3,
       "crit_chance": 10,
       "description": "Эльфийская друида, лечит союзников силой леса.",
       "passive": {
-        "name": "Жизнь леса",
-        "desc": "+15% скорости атаки за каждого союзного эльфа",
+        "name": "Целительная рука",
+        "desc": "+10% за союзника своего класса",
         "type": "synergy_buff",
         "class": "healer",
-        "count_by": "race",
-        "effect": {"speed_bonus_pct_per_ally": 15}
+        "effect": {
+          "speed_bonus_pct_per_ally": 10
+        }
       },
       "active": {
-        "name": "Целебный цветок",
-        "desc": "Лечит союзника с наименьшим HP на 90",
-        "type": "heal",
-        "cooldown": 18,
-        "effect": {"heal": 90}
+        "name": "Сок дерева",
+        "type": "heal_over_time",
+        "cooldown": 1.0,
+        "effect": {
+          "heal_per_tick": 3,
+          "duration": 2.0,
+          "targets": "lowest_ally"
+        }
       }
     },
     "undead_healer_necromancer": {
@@ -686,26 +1034,29 @@
       "cost": 3,
       "class": "healer",
       "race": "undead",
-      "hp": 380,
-      "damage": 70,
+      "hp": 600,
+      "damage": 66,
       "attack_speed": 0.9,
       "range": 3,
       "crit_chance": 5,
       "description": "Некромант, лечит союзную нежить тёмной магией.",
       "passive": {
-        "name": "Тёмное восстановление",
-        "desc": "+10% снижения урона за каждого союзного нежити",
+        "name": "Целительная рука",
+        "desc": "+11% за союзника своего класса",
         "type": "synergy_buff",
         "class": "healer",
-        "count_by": "race",
-        "effect": {"damage_reduction_pct_per_ally": 10}
+        "effect": {
+          "speed_bonus_pct_per_ally": 11
+        }
       },
       "active": {
-        "name": "Некроисцеление",
-        "desc": "Лечит союзника с наименьшим HP на 110",
+        "name": "Массовое сшивание",
         "type": "heal",
-        "cooldown": 22,
-        "effect": {"heal": 110}
+        "cooldown": 0.8,
+        "effect": {
+          "heal": 100,
+          "targets": "all_allies"
+        }
       }
     },
     "human_buffer_bard": {
@@ -713,25 +1064,29 @@
       "cost": 3,
       "class": "buffer",
       "race": "human",
-      "hp": 320,
-      "damage": 60,
+      "hp": 630,
+      "damage": 77,
       "attack_speed": 1.1,
       "range": 3,
       "crit_chance": 10,
       "description": "Человеческий бард, вдохновляет союзников своим пением.",
       "passive": {
-        "name": "Песнь вдохновения",
-        "desc": "+10% скорости атаки за каждого союзного баффера",
+        "name": "Голос вождя",
+        "desc": "+12% за союзника своего класса",
         "type": "synergy_buff",
         "class": "buffer",
-        "effect": {"speed_bonus_pct_per_ally": 10}
+        "effect": {
+          "speed_bonus_pct_per_ally": 12
+        }
       },
       "active": {
-        "name": "Бардовская песня",
-        "desc": "+25% скорости атаки всем союзникам на 15 тиков",
+        "name": "Боевая песня",
         "type": "buff_allies",
-        "cooldown": 25,
-        "effect": {"attack_speed_pct": 25, "duration": 15}
+        "cooldown": 1.0,
+        "effect": {
+          "attack_speed_pct": 25,
+          "duration": 2.5
+        }
       }
     },
     "orc_buffer_warchief_advisor": {
@@ -739,26 +1094,29 @@
       "cost": 4,
       "class": "buffer",
       "race": "orc",
-      "hp": 450,
-      "damage": 100,
+      "hp": 798,
+      "damage": 102,
       "attack_speed": 1.0,
       "range": 2,
       "crit_chance": 10,
       "description": "Советник вождя, вдохновляет орков на больший урон.",
       "passive": {
         "name": "Голос вождя",
-        "desc": "+20% урона за каждого союзного орка",
+        "desc": "+13% за союзника своего класса",
         "type": "synergy_buff",
         "class": "buffer",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 20}
+        "effect": {
+          "speed_bonus_pct_per_ally": 13
+        }
       },
       "active": {
-        "name": "Крик вдохновения",
-        "desc": "+40% урона всем союзникам на 12 тиков",
+        "name": "Совет вождя",
         "type": "buff_allies",
-        "cooldown": 30,
-        "effect": {"damage_bonus_pct": 40, "duration": 12}
+        "cooldown": 1.0,
+        "effect": {
+          "damage_bonus_pct": 20,
+          "duration": 2.5
+        }
       }
     },
     "demon_buffer_demon_lord": {
@@ -766,26 +1124,29 @@
       "cost": 5,
       "class": "buffer",
       "race": "demon",
-      "hp": 500,
-      "damage": 130,
+      "hp": 998,
+      "damage": 133,
       "attack_speed": 0.9,
       "range": 3,
       "crit_chance": 20,
       "description": "Властитель демонов, усиливает криты союзников.",
       "passive": {
-        "name": "Аура хаоса",
-        "desc": "+15% урона за каждого союзного демона",
+        "name": "Голос вождя",
+        "desc": "+14% за союзника своего класса",
         "type": "synergy_buff",
         "class": "buffer",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 15}
+        "effect": {
+          "speed_bonus_pct_per_ally": 14
+        }
       },
       "active": {
-        "name": "Аура критов",
-        "desc": "+20% шанса крита всем союзникам на 20 тиков",
+        "name": "Власть демонов",
         "type": "buff_allies",
-        "cooldown": 35,
-        "effect": {"crit_chance_bonus": 20, "duration": 20}
+        "cooldown": 1.0,
+        "effect": {
+          "damage_bonus_pct": 30,
+          "duration": 2.5
+        }
       }
     },
     "elf_buffer_forest_guardian": {
@@ -793,26 +1154,29 @@
       "cost": 3,
       "class": "buffer",
       "race": "elf",
-      "hp": 340,
-      "damage": 80,
-      "attack_speed": 1.3,
+      "hp": 630,
+      "damage": 69,
+      "attack_speed": 1.1,
       "range": 3,
       "crit_chance": 15,
       "description": "Эльф-страж, ускоряет союзников своей магией.",
       "passive": {
-        "name": "Легкость леса",
-        "desc": "+20% скорости атаки за каждого союзного эльфа",
+        "name": "Голос вождя",
+        "desc": "+12% за союзника своего класса",
         "type": "synergy_buff",
         "class": "buffer",
-        "count_by": "race",
-        "effect": {"speed_bonus_pct_per_ally": 20}
+        "effect": {
+          "speed_bonus_pct_per_ally": 12
+        }
       },
       "active": {
-        "name": "Лестное ускорение",
-        "desc": "+30% скорости атаки всем союзникам на 18 тиков",
+        "name": "Кора-оберег",
         "type": "buff_allies",
-        "cooldown": 25,
-        "effect": {"attack_speed_pct": 30, "duration": 18}
+        "cooldown": 1.0,
+        "effect": {
+          "damage_reduction_pct": 25,
+          "duration": 2.5
+        }
       }
     },
     "undead_buffer_ghost_chieftain": {
@@ -820,26 +1184,29 @@
       "cost": 4,
       "class": "buffer",
       "race": "undead",
-      "hp": 420,
-      "damage": 90,
+      "hp": 798,
+      "damage": 102,
       "attack_speed": 1.0,
       "range": 2,
       "crit_chance": 10,
       "description": "Призрачный вождь, снижает урон по союзникам.",
       "passive": {
-        "name": "Тень смерти",
-        "desc": "+15% снижения урона за каждого союзного нежити",
+        "name": "Голос вождя",
+        "desc": "+13% за союзника своего класса",
         "type": "synergy_buff",
         "class": "buffer",
-        "count_by": "race",
-        "effect": {"damage_reduction_pct_per_ally": 15}
+        "effect": {
+          "speed_bonus_pct_per_ally": 13
+        }
       },
       "active": {
-        "name": "Призрачный щит",
-        "desc": "+30% снижения урона всем союзникам на 15 тиков",
+        "name": "Призрачная скорость",
         "type": "buff_allies",
-        "cooldown": 30,
-        "effect": {"damage_reduction_pct": 30, "duration": 15}
+        "cooldown": 1.0,
+        "effect": {
+          "attack_speed_pct": 22,
+          "duration": 2.5
+        }
       }
     },
     "human_assassin_spy": {
@@ -847,25 +1214,30 @@
       "cost": 4,
       "class": "assassin",
       "race": "human",
-      "hp": 280,
-      "damage": 150,
+      "hp": 646,
+      "damage": 181,
       "attack_speed": 1.2,
       "range": 2,
       "crit_chance": 25,
       "description": "Шпион людей, телепортируется в задние ряды и убивает слабого.",
       "passive": {
-        "name": "Теневая атака",
-        "desc": "+10% шанса крита за каждого союзного убийцы",
+        "name": "Клинок в тени",
+        "desc": "+15% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "effect": {"crit_chance_bonus_per_ally": 10}
+        "effect": {
+          "damage_bonus_pct_per_ally": 15
+        }
       },
       "active": {
-        "name": "Теневой скачок",
-        "desc": "Ждёт 60 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
+        "name": "Шпионский удар",
         "type": "assassin_teleport",
-        "cooldown": 60,
-        "effect": {"wait_ticks": 60, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 45,
+          "target_weakest": true,
+          "arrival_stun": 5
+        }
       }
     },
     "orc_assassin_raider": {
@@ -873,26 +1245,30 @@
       "cost": 4,
       "class": "assassin",
       "race": "orc",
-      "hp": 320,
-      "damage": 180,
+      "hp": 646,
+      "damage": 181,
       "attack_speed": 1.1,
       "range": 2,
       "crit_chance": 20,
       "description": "Орк-налётчик, обходит фронт и атакует слабого сзади.",
       "passive": {
-        "name": "Ярость налёта",
-        "desc": "+15% урона за каждого союзного орка",
+        "name": "Клинок в тени",
+        "desc": "+15% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 15}
+        "effect": {
+          "damage_bonus_pct_per_ally": 15
+        }
       },
       "active": {
-        "name": "Внезапный налёт",
-        "desc": "Ждёт 55 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
+        "name": "Набег",
         "type": "assassin_teleport",
-        "cooldown": 55,
-        "effect": {"wait_ticks": 55, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 45,
+          "target_weakest": true,
+          "arrival_damage": 110
+        }
       }
     },
     "demon_assassin_shadow_killer": {
@@ -900,26 +1276,30 @@
       "cost": 5,
       "class": "assassin",
       "race": "demon",
-      "hp": 300,
-      "damage": 220,
+      "hp": 808,
+      "damage": 238,
       "attack_speed": 1.3,
       "range": 2,
       "crit_chance": 30,
       "description": "Демон-убийца из теней, наносит сокрушительные критические удары.",
       "passive": {
-        "name": "Повелитель теней",
-        "desc": "+15% урона за каждого союзного демона",
+        "name": "Клинок в тени",
+        "desc": "+16% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 15}
+        "effect": {
+          "damage_bonus_pct_per_ally": 16
+        }
       },
       "active": {
-        "name": "Смертельная тень",
-        "desc": "Ждёт 50 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
+        "name": "Убийца теней",
         "type": "assassin_teleport",
-        "cooldown": 50,
-        "effect": {"wait_ticks": 50, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 45,
+          "target_weakest": true,
+          "arrival_damage": 130
+        }
       }
     },
     "elf_assassin_shadow_walker": {
@@ -927,26 +1307,30 @@
       "cost": 4,
       "class": "assassin",
       "race": "elf",
-      "hp": 260,
-      "damage": 160,
-      "attack_speed": 1.5,
+      "hp": 646,
+      "damage": 163,
+      "attack_speed": 1.27,
       "range": 3,
       "crit_chance": 25,
       "description": "Эльф, передвигающийся по теням, атакует самого слабого врага.",
       "passive": {
-        "name": "Легкий шаг",
-        "desc": "+20% скорости атаки за каждого союзного эльфа",
+        "name": "Клинок в тени",
+        "desc": "+15% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "count_by": "race",
-        "effect": {"speed_bonus_pct_per_ally": 20}
+        "effect": {
+          "damage_bonus_pct_per_ally": 15
+        }
       },
       "active": {
-        "name": "Теневой прыжок",
-        "desc": "Ждёт 45 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
+        "name": "Теневой шаг",
         "type": "assassin_teleport",
-        "cooldown": 45,
-        "effect": {"wait_ticks": 45, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 40,
+          "target_weakest": true,
+          "arrival_stun": 6
+        }
       }
     },
     "undead_assassin_death_stalker": {
@@ -954,53 +1338,62 @@
       "cost": 5,
       "class": "assassin",
       "race": "undead",
-      "hp": 340,
-      "damage": 200,
+      "hp": 808,
+      "damage": 238,
       "attack_speed": 1.2,
       "range": 2,
       "crit_chance": 25,
       "description": "Нежить-преследователь, выходит из тени и убивает слабого.",
       "passive": {
-        "name": "Тёмная метка",
-        "desc": "+15% снижения урона за каждого союзного нежити",
+        "name": "Клинок в тени",
+        "desc": "+16% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "count_by": "race",
-        "effect": {"damage_reduction_pct_per_ally": 15}
+        "effect": {
+          "damage_bonus_pct_per_ally": 16
+        }
       },
       "active": {
-        "name": "Смертельный скачок",
-        "desc": "Ждёт 50 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
+        "name": "Жнец",
         "type": "assassin_teleport",
-        "cooldown": 50,
-        "effect": {"wait_ticks": 50, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 40,
+          "target_weakest": true,
+          "arrival_damage": 120,
+          "execute_threshold_pct": 30
+        }
       }
     },
-
     "orc_healer_witch": {
       "name": "Оркская ведьма",
       "cost": 1,
       "class": "healer",
       "race": "orc",
       "hp": 320,
-      "damage": 45,
+      "damage": 33,
       "attack_speed": 1.1,
       "range": 3,
       "crit_chance": 5,
       "description": "Оркский хилер, лечит союзника с наименьшим HP.",
       "passive": {
-        "name": "Дух лечения",
-        "desc": "+10% HP за каждого союзного целителя",
+        "name": "Целительная рука",
+        "desc": "+9% за союзника своего класса",
         "type": "synergy_buff",
         "class": "healer",
-        "effect": {"hp_bonus_pct_per_ally": 10}
+        "effect": {
+          "speed_bonus_pct_per_ally": 9
+        }
       },
       "active": {
-        "name": "Целебный дух",
-        "desc": "Лечит союзника с наименьшим HP на 50",
-        "type": "heal",
-        "cooldown": 20,
-        "effect": {"heal": 50}
+        "name": "Ведьмин отвар",
+        "type": "heal_over_time",
+        "cooldown": 1.0,
+        "effect": {
+          "heal_per_tick": 2,
+          "duration": 2.0,
+          "targets": "lowest_ally"
+        }
       }
     },
     "elf_healer_spirit": {
@@ -1008,53 +1401,59 @@
       "cost": 1,
       "class": "healer",
       "race": "elf",
-      "hp": 300,
-      "damage": 40,
-      "attack_speed": 1.2,
+      "hp": 320,
+      "damage": 30,
+      "attack_speed": 1.02,
       "range": 3,
       "crit_chance": 10,
       "description": "Эльфийский дух леса, исцеляет союзников природой.",
       "passive": {
-        "name": "Природное исцеление",
-        "desc": "+10% скорости атаки за каждого союзного эльфа",
+        "name": "Целительная рука",
+        "desc": "+9% за союзника своего класса",
         "type": "synergy_buff",
         "class": "healer",
-        "count_by": "race",
-        "effect": {"speed_bonus_pct_per_ally": 10}
+        "effect": {
+          "speed_bonus_pct_per_ally": 9
+        }
       },
       "active": {
-        "name": "Цветок жизни",
-        "desc": "Лечит союзника с наименьшим HP на 45",
+        "name": "Дух леса",
         "type": "heal",
-        "cooldown": 18,
-        "effect": {"heal": 45}
+        "cooldown": 0.8,
+        "effect": {
+          "heal": 32,
+          "targets": "lowest_ally"
+        }
       }
     },
     "undead_bone_shaman": {
       "name": "Костяной шаман нежити",
-      "cost": 1,
+      "cost": 2,
       "class": "buffer",
       "race": "undead",
-      "hp": 350,
-      "damage": 50,
+      "hp": 472,
+      "damage": 56,
       "attack_speed": 0.9,
       "range": 2,
       "crit_chance": 5,
       "description": "Баффер нежити, снижает урон по союзникам.",
       "passive": {
-        "name": "Костяная стойкость",
-        "desc": "+5% снижения урона за каждого союзного нежити",
+        "name": "Голос вождя",
+        "desc": "+11% за союзника своего класса",
         "type": "synergy_buff",
         "class": "buffer",
-        "count_by": "race",
-        "effect": {"damage_reduction_pct_per_ally": 5}
+        "effect": {
+          "speed_bonus_pct_per_ally": 11
+        }
       },
       "active": {
-        "name": "Костяной щит",
-        "desc": "+20% снижения урона всем союзникам на 12 тиков",
+        "name": "Костяной оберег",
         "type": "buff_allies",
-        "cooldown": 25,
-        "effect": {"damage_reduction_pct": 20, "duration": 12}
+        "cooldown": 1.0,
+        "effect": {
+          "damage_reduction_pct": 20,
+          "duration": 2.5
+        }
       }
     },
     "demon_fire_totem": {
@@ -1062,26 +1461,29 @@
       "cost": 1,
       "class": "buffer",
       "race": "demon",
-      "hp": 300,
-      "damage": 60,
+      "hp": 336,
+      "damage": 38,
       "attack_speed": 1.0,
       "range": 2,
       "crit_chance": 10,
       "description": "Баффер демонов, ускоряет атаки союзников.",
       "passive": {
-        "name": "Огненная сила",
-        "desc": "+10% урона за каждого союзного демона",
+        "name": "Голос вождя",
+        "desc": "+10% за союзника своего класса",
         "type": "synergy_buff",
         "class": "buffer",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 10}
+        "effect": {
+          "speed_bonus_pct_per_ally": 10
+        }
       },
       "active": {
-        "name": "Огненный всплеск",
-        "desc": "+20% скорости атаки всем союзникам на 10 тиков",
+        "name": "Огненная сила",
         "type": "buff_allies",
-        "cooldown": 20,
-        "effect": {"attack_speed_pct": 20, "duration": 10}
+        "cooldown": 0.8,
+        "effect": {
+          "attack_speed_pct": 20,
+          "duration": 2.5
+        }
       }
     },
     "human_assassin_knife": {
@@ -1089,25 +1491,30 @@
       "cost": 1,
       "class": "assassin",
       "race": "human",
-      "hp": 240,
-      "damage": 100,
+      "hp": 272,
+      "damage": 69,
       "attack_speed": 1.3,
       "range": 2,
       "crit_chance": 20,
       "description": "Ассасин людей, телепортируется в задние ряды и убивает слабого.",
       "passive": {
-        "name": "Тень клинка",
-        "desc": "+10% шанса крита за каждого союзного убийцы",
+        "name": "Клинок в тени",
+        "desc": "+12% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "effect": {"crit_chance_bonus_per_ally": 10}
+        "effect": {
+          "damage_bonus_pct_per_ally": 12
+        }
       },
       "active": {
-        "name": "Теневой скачок",
-        "desc": "Ждёт 50 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
+        "name": "Удар из тени",
         "type": "assassin_teleport",
-        "cooldown": 50,
-        "effect": {"wait_ticks": 50, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 30,
+          "target_weakest": true,
+          "arrival_damage": 50
+        }
       }
     },
     "undead_assassin_shadow": {
@@ -1115,26 +1522,30 @@
       "cost": 1,
       "class": "assassin",
       "race": "undead",
-      "hp": 260,
-      "damage": 110,
+      "hp": 272,
+      "damage": 69,
       "attack_speed": 1.2,
       "range": 2,
       "crit_chance": 20,
       "description": "Ассасин нежити, выходит из тени и убивает слабого.",
       "passive": {
-        "name": "Тёмная метка",
-        "desc": "+10% снижения урона за каждого союзного нежити",
+        "name": "Клинок в тени",
+        "desc": "+12% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "count_by": "race",
-        "effect": {"damage_reduction_pct_per_ally": 10}
+        "effect": {
+          "damage_bonus_pct_per_ally": 12
+        }
       },
       "active": {
-        "name": "Теневой прыжок",
-        "desc": "Ждёт 45 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
+        "name": "Тень",
         "type": "assassin_teleport",
-        "cooldown": 45,
-        "effect": {"wait_ticks": 45, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 25,
+          "target_weakest": true,
+          "arrival_damage": 45
+        }
       }
     },
     "orc_archer_slinger": {
@@ -1142,69 +1553,87 @@
       "cost": 1,
       "class": "archer",
       "race": "orc",
-      "hp": 280,
-      "damage": 70,
+      "hp": 272,
+      "damage": 66,
       "attack_speed": 1.4,
       "range": 3,
       "crit_chance": 10,
       "description": "Орк-стрелок, метает камни издалека.",
       "passive": {
-        "name": "Оркский глаз",
-        "desc": "+10% скорости атаки за каждого союзного орка",
+        "name": "Точный расчёт",
+        "desc": "+11% за союзника своего класса",
         "type": "synergy_buff",
         "class": "archer",
-        "count_by": "race",
-        "effect": {"speed_bonus_pct_per_ally": 10}
+        "effect": {
+          "damage_bonus_pct_per_ally": 11
+        }
       },
-      "active": null
+      "active": {
+        "name": "Камень",
+        "type": "single_target_critical",
+        "cooldown": 0.8,
+        "effect": {
+          "damage": 45
+        }
+      }
     },
     "undead_mage_bone": {
       "name": "Костяной маг нежити",
-      "cost": 1,
+      "cost": 2,
       "class": "mage",
       "race": "undead",
-      "hp": 290,
-      "damage": 80,
+      "hp": 360,
+      "damage": 100,
       "attack_speed": 0.9,
       "range": 4,
       "crit_chance": 10,
       "description": "Маг нежити, бьёт костяными стрелами.",
       "passive": {
-        "name": "Холод костей",
-        "desc": "+10% урона за каждого союзного нежити",
+        "name": "Тайна стихий",
+        "desc": "+12% за союзника своего класса",
         "type": "synergy_buff",
         "class": "mage",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 10}
+        "effect": {
+          "damage_bonus_pct_per_ally": 12
+        }
       },
-      "active": null
+      "active": {
+        "name": "Костяной шип",
+        "type": "single_target_critical",
+        "cooldown": 0.8,
+        "effect": {
+          "damage": 85
+        }
+      }
     },
-
     "demon_buffer_hell_priest": {
       "name": "Жрец ада демонов",
       "cost": 2,
       "class": "buffer",
       "race": "demon",
-      "hp": 380,
-      "damage": 70,
+      "hp": 472,
+      "damage": 56,
       "attack_speed": 1.0,
       "range": 3,
       "crit_chance": 15,
       "description": "Баффер демонов, усиливает шанс крита союзников.",
       "passive": {
-        "name": "Аура хаоса",
-        "desc": "+10% урона за каждого союзного демона",
+        "name": "Голос вождя",
+        "desc": "+11% за союзника своего класса",
         "type": "synergy_buff",
         "class": "buffer",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 10}
+        "effect": {
+          "speed_bonus_pct_per_ally": 11
+        }
       },
       "active": {
         "name": "Аура критов",
-        "desc": "+15% шанса крита всем союзникам на 15 тиков",
         "type": "buff_allies",
-        "cooldown": 30,
-        "effect": {"crit_chance_bonus": 15, "duration": 15}
+        "cooldown": 1.0,
+        "effect": {
+          "crit_chance_bonus": 15,
+          "duration": 2.5
+        }
       }
     },
     "undead_bone_buff": {
@@ -1212,26 +1641,29 @@
       "cost": 2,
       "class": "buffer",
       "race": "undead",
-      "hp": 400,
-      "damage": 60,
+      "hp": 472,
+      "damage": 56,
       "attack_speed": 0.9,
       "range": 2,
       "crit_chance": 5,
       "description": "Баффер нежити, щитит союзников от урона.",
       "passive": {
-        "name": "Костяная стойкость",
-        "desc": "+10% снижения урона за каждого союзного нежити",
+        "name": "Голос вождя",
+        "desc": "+11% за союзника своего класса",
         "type": "synergy_buff",
         "class": "buffer",
-        "count_by": "race",
-        "effect": {"damage_reduction_pct_per_ally": 10}
+        "effect": {
+          "speed_bonus_pct_per_ally": 11
+        }
       },
       "active": {
-        "name": "Костяной щит",
-        "desc": "+25% снижения урона всем союзникам на 15 тиков",
+        "name": "Сила могилы",
         "type": "buff_allies",
-        "cooldown": 25,
-        "effect": {"damage_reduction_pct": 25, "duration": 15}
+        "cooldown": 1.0,
+        "effect": {
+          "damage_bonus_pct": 18,
+          "duration": 2.5
+        }
       }
     },
     "human_assassin_blade": {
@@ -1239,25 +1671,33 @@
       "cost": 2,
       "class": "assassin",
       "race": "human",
-      "hp": 280,
-      "damage": 130,
+      "hp": 382,
+      "damage": 100,
       "attack_speed": 1.3,
       "range": 2,
       "crit_chance": 25,
       "description": "Ассасин людей с быстрым клинком.",
       "passive": {
-        "name": "Тень клинка",
-        "desc": "+10% шанса крита за каждого союзного убийцы",
+        "name": "Клинок в тени",
+        "desc": "+13% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "effect": {"crit_chance_bonus_per_ally": 10}
+        "effect": {
+          "damage_bonus_pct_per_ally": 13
+        }
       },
       "active": {
-        "name": "Быстрый скачок",
-        "desc": "Ждёт 45 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
+        "name": "Вскрытие",
         "type": "assassin_teleport",
-        "cooldown": 45,
-        "effect": {"wait_ticks": 45, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 35,
+          "target_weakest": true,
+          "arrival_dot": {
+            "damage_per_tick": 10,
+            "duration": 6
+          }
+        }
       }
     },
     "orc_assassin_axe": {
@@ -1265,26 +1705,30 @@
       "cost": 2,
       "class": "assassin",
       "race": "orc",
-      "hp": 300,
-      "damage": 150,
+      "hp": 382,
+      "damage": 100,
       "attack_speed": 1.2,
       "range": 2,
       "crit_chance": 20,
       "description": "Орк-ассасин с brute force.",
       "passive": {
-        "name": "Ярость орка",
-        "desc": "+15% урона за каждого союзного орка",
+        "name": "Клинок в тени",
+        "desc": "+13% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 15}
+        "effect": {
+          "damage_bonus_pct_per_ally": 13
+        }
       },
       "active": {
-        "name": "Топор смерти",
-        "desc": "Ждёт 50 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
+        "name": "Бросок топора",
         "type": "assassin_teleport",
-        "cooldown": 50,
-        "effect": {"wait_ticks": 50, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 35,
+          "target_weakest": true,
+          "arrival_damage": 70
+        }
       }
     },
     "demon_assassin_shadow_blade": {
@@ -1292,26 +1736,30 @@
       "cost": 2,
       "class": "assassin",
       "race": "demon",
-      "hp": 270,
-      "damage": 140,
+      "hp": 382,
+      "damage": 100,
       "attack_speed": 1.4,
       "range": 2,
       "crit_chance": 30,
       "description": "Демон-ассасин из теней с крит-уроном.",
       "passive": {
-        "name": "Повелитель теней",
-        "desc": "+15% урона за каждого союзного демона",
+        "name": "Клинок в тени",
+        "desc": "+13% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 15}
+        "effect": {
+          "damage_bonus_pct_per_ally": 13
+        }
       },
       "active": {
         "name": "Смертельная тень",
-        "desc": "Ждёт 40 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
         "type": "assassin_teleport",
-        "cooldown": 40,
-        "effect": {"wait_ticks": 40, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 40,
+          "target_weakest": true,
+          "arrival_damage": 75
+        }
       }
     },
     "elf_assassin_leaf_blade": {
@@ -1319,26 +1767,33 @@
       "cost": 2,
       "class": "assassin",
       "race": "elf",
-      "hp": 250,
-      "damage": 120,
-      "attack_speed": 1.5,
+      "hp": 382,
+      "damage": 90,
+      "attack_speed": 1.27,
       "range": 3,
       "crit_chance": 25,
       "description": "Эльф-ассасин с литообразным клинком.",
       "passive": {
-        "name": "Легкий шаг",
-        "desc": "+20% скорости атаки за каждого союзного эльфа",
+        "name": "Клинок в тени",
+        "desc": "+13% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "count_by": "race",
-        "effect": {"speed_bonus_pct_per_ally": 20}
+        "effect": {
+          "damage_bonus_pct_per_ally": 13
+        }
       },
       "active": {
-        "name": "Теневой прыжок",
-        "desc": "Ждёт 40 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
+        "name": "Листовой клинок",
         "type": "assassin_teleport",
-        "cooldown": 40,
-        "effect": {"wait_ticks": 40, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 30,
+          "target_weakest": true,
+          "arrival_dot": {
+            "damage_per_tick": 9,
+            "duration": 6
+          }
+        }
       }
     },
     "undead_assassin_bone_blade": {
@@ -1346,137 +1801,185 @@
       "cost": 2,
       "class": "assassin",
       "race": "undead",
-      "hp": 290,
-      "damage": 130,
+      "hp": 382,
+      "damage": 100,
       "attack_speed": 1.3,
       "range": 2,
       "crit_chance": 25,
       "description": "Ассасин нежити с костным клинком.",
       "passive": {
-        "name": "Тёмная метка",
-        "desc": "+15% снижения урона за каждого союзного нежити",
+        "name": "Клинок в тени",
+        "desc": "+13% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "count_by": "race",
-        "effect": {"damage_reduction_pct_per_ally": 15}
+        "effect": {
+          "damage_bonus_pct_per_ally": 13
+        }
       },
       "active": {
-        "name": "Костяной скачок",
-        "desc": "Ждёт 45 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
+        "name": "Костяное лезвие",
         "type": "assassin_teleport",
-        "cooldown": 45,
-        "effect": {"wait_ticks": 45, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 30,
+          "target_weakest": true,
+          "arrival_dot": {
+            "damage_per_tick": 10,
+            "duration": 6
+          }
+        }
       }
     },
-
     "orc_warrior_axe_bearer": {
       "name": "Носитель топора орка",
       "cost": 3,
       "class": "warrior",
       "race": "orc",
       "hp": 750,
-      "damage": 130,
+      "damage": 82,
       "attack_speed": 1.1,
       "range": 1,
       "crit_chance": 15,
       "description": "Орк-воин с массивным топором.",
       "passive": {
-        "name": "Оркская ярость",
-        "desc": "+15% урона за каждого союзного орка",
+        "name": "Братство стали",
+        "desc": "+13% за союзника своего класса",
         "type": "synergy_buff",
         "class": "warrior",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 15}
+        "effect": {
+          "hp_bonus_pct_per_ally": 13
+        }
       },
-      "active": null
+      "active": {
+        "name": "Рассекающий удар",
+        "type": "aoe_damage",
+        "cooldown": 0.8,
+        "effect": {
+          "damage": 100,
+          "radius": 1
+        }
+      }
     },
     "undead_warrior_bone_guard": {
       "name": "Костяной страж нежити",
       "cost": 3,
       "class": "warrior",
       "race": "undead",
-      "hp": 700,
-      "damage": 110,
+      "hp": 750,
+      "damage": 82,
       "attack_speed": 1.0,
       "range": 1,
       "crit_chance": 10,
       "description": "Страж нежити из костей и доспехов.",
       "passive": {
-        "name": "Костяная броня",
-        "desc": "+10% снижения урона за каждого союзного нежити",
+        "name": "Братство стали",
+        "desc": "+13% за союзника своего класса",
         "type": "synergy_buff",
         "class": "warrior",
-        "count_by": "race",
-        "effect": {"damage_reduction_pct_per_ally": 10}
+        "effect": {
+          "hp_bonus_pct_per_ally": 13
+        }
       },
-      "active": null
+      "active": {
+        "name": "Костяная стена",
+        "type": "taunt",
+        "cooldown": 1.0,
+        "effect": {
+          "duration": 2.0,
+          "radius": 2
+        }
+      }
     },
     "demon_archer_fire_bow": {
       "name": "Огненный лук демона",
       "cost": 3,
       "class": "archer",
       "race": "demon",
-      "hp": 320,
-      "damage": 150,
+      "hp": 510,
+      "damage": 132,
       "attack_speed": 1.2,
       "range": 5,
       "crit_chance": 20,
       "description": "Демон-стрелок с огненным луком.",
       "passive": {
-        "name": "Огненный глаз",
-        "desc": "+15% урона за каждого союзного демона",
+        "name": "Точный расчёт",
+        "desc": "+13% за союзника своего класса",
         "type": "synergy_buff",
         "class": "archer",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 15}
+        "effect": {
+          "damage_bonus_pct_per_ally": 13
+        }
       },
-      "active": null
+      "active": {
+        "name": "Горящая стрела",
+        "type": "dot",
+        "cooldown": 0.8,
+        "effect": {
+          "damage_per_tick": 14,
+          "duration": 2.0,
+          "radius": 1,
+          "targets": "single"
+        }
+      }
     },
     "undead_archer_bone_bow": {
       "name": "Костяной лук нежити",
       "cost": 3,
       "class": "archer",
       "race": "undead",
-      "hp": 300,
-      "damage": 130,
+      "hp": 510,
+      "damage": 132,
       "attack_speed": 1.1,
       "range": 4,
       "crit_chance": 15,
       "description": "Нежить-стрелок с костяным луком.",
       "passive": {
-        "name": "Холод смерти",
-        "desc": "+10% урона за каждого союзного нежити",
+        "name": "Точный расчёт",
+        "desc": "+13% за союзника своего класса",
         "type": "synergy_buff",
         "class": "archer",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 10}
+        "effect": {
+          "damage_bonus_pct_per_ally": 13
+        }
       },
-      "active": null
+      "active": {
+        "name": "Костяная стрела",
+        "type": "single_target_critical",
+        "cooldown": 0.8,
+        "effect": {
+          "damage": 100
+        }
+      }
     },
     "human_assassin_dark_blade": {
       "name": "Тёмное лезвие человека",
       "cost": 3,
       "class": "assassin",
       "race": "human",
-      "hp": 300,
-      "damage": 160,
+      "hp": 510,
+      "damage": 138,
       "attack_speed": 1.4,
       "range": 2,
       "crit_chance": 30,
       "description": "Ассасин человека с тёмным клинком.",
       "passive": {
-        "name": "Тень клинка",
-        "desc": "+10% шанса крита за каждого союзного убийцы",
+        "name": "Клинок в тени",
+        "desc": "+14% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "effect": {"crit_chance_bonus_per_ally": 10}
+        "effect": {
+          "damage_bonus_pct_per_ally": 14
+        }
       },
       "active": {
-        "name": "Тёмный скачок",
-        "desc": "Ждёт 40 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
+        "name": "Тёмный клинок",
         "type": "assassin_teleport",
-        "cooldown": 40,
-        "effect": {"wait_ticks": 40, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 40,
+          "target_weakest": true,
+          "arrival_damage": 90
+        }
       }
     },
     "orc_assassin_war_axe": {
@@ -1484,26 +1987,33 @@
       "cost": 3,
       "class": "assassin",
       "race": "orc",
-      "hp": 340,
-      "damage": 180,
+      "hp": 510,
+      "damage": 138,
       "attack_speed": 1.2,
       "range": 2,
       "crit_chance": 25,
       "description": "Орк-ассасин с военным топором.",
       "passive": {
-        "name": "Оркская ярость",
-        "desc": "+15% урона за каждого союзного орка",
+        "name": "Клинок в тени",
+        "desc": "+14% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 15}
+        "effect": {
+          "damage_bonus_pct_per_ally": 14
+        }
       },
       "active": {
-        "name": "Военный налёт",
-        "desc": "Ждёт 45 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
+        "name": "Кровавый топор",
         "type": "assassin_teleport",
-        "cooldown": 45,
-        "effect": {"wait_ticks": 45, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 40,
+          "target_weakest": true,
+          "arrival_dot": {
+            "damage_per_tick": 12,
+            "duration": 7
+          }
+        }
       }
     },
     "demon_assassin_shadow_edge": {
@@ -1511,26 +2021,33 @@
       "cost": 3,
       "class": "assassin",
       "race": "demon",
-      "hp": 310,
-      "damage": 170,
+      "hp": 510,
+      "damage": 138,
       "attack_speed": 1.3,
       "range": 2,
       "crit_chance": 30,
       "description": "Демон-ассасин с теневым краем.",
       "passive": {
-        "name": "Повелитель теней",
-        "desc": "+15% урона за каждого союзного демона",
+        "name": "Клинок в тени",
+        "desc": "+14% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 15}
+        "effect": {
+          "damage_bonus_pct_per_ally": 14
+        }
       },
       "active": {
-        "name": "Смертельная тень",
-        "desc": "Ждёт 35 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
+        "name": "Теневая грань",
         "type": "assassin_teleport",
-        "cooldown": 35,
-        "effect": {"wait_ticks": 35, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 41,
+          "target_weakest": true,
+          "arrival_dot": {
+            "damage_per_tick": 12,
+            "duration": 7
+          }
+        }
       }
     },
     "elf_assassin_wind_blade": {
@@ -1538,26 +2055,30 @@
       "cost": 3,
       "class": "assassin",
       "race": "elf",
-      "hp": 280,
-      "damage": 140,
-      "attack_speed": 1.5,
+      "hp": 510,
+      "damage": 124,
+      "attack_speed": 1.27,
       "range": 3,
       "crit_chance": 25,
       "description": "Эльф-ассасин с ветровым клинком.",
       "passive": {
-        "name": "Легкий шаг",
-        "desc": "+20% скорости атаки за каждого союзного эльфа",
+        "name": "Клинок в тени",
+        "desc": "+14% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "count_by": "race",
-        "effect": {"speed_bonus_pct_per_ally": 20}
+        "effect": {
+          "damage_bonus_pct_per_ally": 14
+        }
       },
       "active": {
-        "name": "Ветровой прыжок",
-        "desc": "Ждёт 35 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
+        "name": "Ветровой клинок",
         "type": "assassin_teleport",
-        "cooldown": 35,
-        "effect": {"wait_ticks": 35, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 35,
+          "target_weakest": true,
+          "arrival_damage": 80
+        }
       }
     },
     "undead_assassin_death_edge": {
@@ -1565,117 +2086,152 @@
       "cost": 3,
       "class": "assassin",
       "race": "undead",
-      "hp": 320,
-      "damage": 160,
+      "hp": 510,
+      "damage": 138,
       "attack_speed": 1.3,
       "range": 2,
       "crit_chance": 25,
       "description": "Ассасин нежити с клинком смерти.",
       "passive": {
-        "name": "Тёмная метка",
-        "desc": "+15% снижения урона за каждого союзного нежити",
+        "name": "Клинок в тени",
+        "desc": "+14% за союзника своего класса",
         "type": "synergy_buff",
         "class": "assassin",
-        "count_by": "race",
-        "effect": {"damage_reduction_pct_per_ally": 15}
+        "effect": {
+          "damage_bonus_pct_per_ally": 14
+        }
       },
       "active": {
-        "name": "Смертельный скачок",
-        "desc": "Ждёт 40 тиков, телепортируется в задние ряды врага, бьёт самого слабого",
+        "name": "Грань смерти",
         "type": "assassin_teleport",
-        "cooldown": 40,
-        "effect": {"wait_ticks": 40, "target_weakest": true}
+        "cooldown": 0.6,
+        "effect": {
+          "wait_ticks": 35,
+          "target_weakest": true,
+          "arrival_damage": 85
+        }
       }
     },
-
     "human_warrior_paladin": {
       "name": "Паладин человека",
       "cost": 4,
       "class": "warrior",
       "race": "human",
-      "hp": 850,
-      "damage": 170,
+      "hp": 950,
+      "damage": 109,
       "attack_speed": 0.9,
       "range": 1,
       "crit_chance": 10,
       "description": "Паладин людей — святой воин в латах.",
       "passive": {
-        "name": "Священная защита",
-        "desc": "+20% HP за каждого союзного человека",
+        "name": "Братство стали",
+        "desc": "+14% за союзника своего класса",
         "type": "synergy_buff",
         "class": "warrior",
-        "count_by": "race",
-        "effect": {"hp_bonus_pct_per_ally": 20}
+        "effect": {
+          "hp_bonus_pct_per_ally": 14
+        }
       },
-      "active": null
+      "active": {
+        "name": "Благословлённый щит",
+        "type": "shield",
+        "cooldown": 1.0,
+        "effect": {
+          "shield": 120,
+          "duration": 2.0,
+          "targets": "lowest_ally"
+        }
+      }
     },
     "human_mage_holy": {
       "name": "Святой маг человека",
       "cost": 4,
       "class": "mage",
       "race": "human",
-      "hp": 420,
-      "damage": 190,
+      "hp": 608,
+      "damage": 181,
       "attack_speed": 0.8,
       "range": 5,
       "crit_chance": 15,
       "description": "Маг света человека с чистой магией.",
       "passive": {
-        "name": "Светлая магия",
-        "desc": "+20% урона за каждого союзного человека",
+        "name": "Тайна стихий",
+        "desc": "+14% за союзника своего класса",
         "type": "synergy_buff",
         "class": "mage",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 20}
+        "effect": {
+          "damage_bonus_pct_per_ally": 14
+        }
       },
-      "active": null
+      "active": {
+        "name": "Святая кара",
+        "type": "stun",
+        "cooldown": 1.0,
+        "effect": {
+          "duration": 2.0,
+          "radius": 1
+        }
+      }
     },
     "demon_mage_fire_lord": {
       "name": "Повелитель огня демонов",
       "cost": 4,
       "class": "mage",
       "race": "demon",
-      "hp": 400,
-      "damage": 210,
+      "hp": 608,
+      "damage": 181,
       "attack_speed": 0.9,
       "range": 5,
       "crit_chance": 20,
       "description": "Маг огня демонов с адским пламенем.",
       "passive": {
-        "name": "Адский огонь",
-        "desc": "+20% урона за каждого союзного демона",
+        "name": "Тайна стихий",
+        "desc": "+14% за союзника своего класса",
         "type": "synergy_buff",
         "class": "mage",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 20}
+        "effect": {
+          "damage_bonus_pct_per_ally": 14
+        }
       },
-      "active": null
+      "active": {
+        "name": "Огненная буря",
+        "type": "dot",
+        "cooldown": 0.8,
+        "effect": {
+          "damage_per_tick": 20,
+          "duration": 2.0,
+          "radius": 2
+        }
+      }
     },
     "human_healer_holy_priest": {
       "name": "Священный жрец человека",
       "cost": 4,
       "class": "healer",
       "race": "human",
-      "hp": 450,
-      "damage": 60,
+      "hp": 760,
+      "damage": 87,
       "attack_speed": 0.9,
       "range": 3,
       "crit_chance": 10,
       "description": "Высший жрец света, лечит союзников.",
       "passive": {
-        "name": "Святой свет",
-        "desc": "+15% HP за каждого союзного человека",
+        "name": "Целительная рука",
+        "desc": "+12% за союзника своего класса",
         "type": "synergy_buff",
         "class": "healer",
-        "count_by": "race",
-        "effect": {"hp_bonus_pct_per_ally": 15}
+        "effect": {
+          "speed_bonus_pct_per_ally": 12
+        }
       },
       "active": {
-        "name": "Святое исцеление",
-        "desc": "Лечит союзника с наименьшим HP на 150",
+        "name": "Молитва",
         "type": "heal",
-        "cooldown": 25,
-        "effect": {"heal": 150}
+        "cooldown": 0.8,
+        "effect": {
+          "heal": 120,
+          "targets": "all_allies"
+        }
       }
     },
     "demon_healer_soul_priest": {
@@ -1683,180 +2239,246 @@
       "cost": 4,
       "class": "healer",
       "race": "demon",
-      "hp": 420,
-      "damage": 80,
+      "hp": 760,
+      "damage": 87,
       "attack_speed": 1.0,
       "range": 3,
       "crit_chance": 15,
       "description": "Жрец душ демонов, лечит за счёт жизни врагов.",
       "passive": {
-        "name": "Сбор душ",
-        "desc": "+15% урона за каждого союзного демона",
+        "name": "Целительная рука",
+        "desc": "+12% за союзника своего класса",
         "type": "synergy_buff",
         "class": "healer",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 15}
+        "effect": {
+          "speed_bonus_pct_per_ally": 12
+        }
       },
       "active": {
-        "name": "Пожирание душ",
-        "desc": "Лечит союзника с наименьшим HP на 140",
-        "type": "heal",
-        "cooldown": 25,
-        "effect": {"heal": 140}
+        "name": "Душевное тепло",
+        "type": "heal_over_time",
+        "cooldown": 1.0,
+        "effect": {
+          "heal_per_tick": 12,
+          "duration": 2.0,
+          "targets": "all_allies"
+        }
       }
     },
-
     "orc_warrior_warlord": {
       "name": "Вождь войны орков",
       "cost": 5,
       "class": "warrior",
       "race": "orc",
-      "hp": 1000,
-      "damage": 220,
+      "hp": 1188,
+      "damage": 142,
       "attack_speed": 0.9,
       "range": 1,
       "crit_chance": 20,
       "description": "Вождь оркской войны — strongest воин орков.",
       "passive": {
-        "name": "Оркская держава",
-        "desc": "+25% урона за каждого союзного орка",
+        "name": "Братство стали",
+        "desc": "+15% за союзника своего класса",
         "type": "synergy_buff",
         "class": "warrior",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 25}
+        "effect": {
+          "hp_bonus_pct_per_ally": 15
+        }
       },
-      "active": null
+      "active": {
+        "name": "Вызов вождя",
+        "type": "taunt",
+        "cooldown": 1.0,
+        "effect": {
+          "duration": 2.0,
+          "radius": 4
+        }
+      }
     },
     "elf_warrior_blade_dancer": {
       "name": "Танцор клинков эльфов",
       "cost": 5,
       "class": "warrior",
       "race": "elf",
-      "hp": 650,
-      "damage": 190,
-      "attack_speed": 1.3,
+      "hp": 1188,
+      "damage": 128,
+      "attack_speed": 1.1,
       "range": 1,
       "crit_chance": 30,
       "description": "Эльф-воин с быстрыми клинками.",
       "passive": {
-        "name": "Легкость эльфа",
-        "desc": "+30% скорости атаки за каждого союзного эльфа",
+        "name": "Братство стали",
+        "desc": "+15% за союзника своего класса",
         "type": "synergy_buff",
         "class": "warrior",
-        "count_by": "race",
-        "effect": {"speed_bonus_pct_per_ally": 30}
+        "effect": {
+          "hp_bonus_pct_per_ally": 15
+        }
       },
-      "active": null
+      "active": {
+        "name": "Танец клинков",
+        "type": "aoe_damage_slow",
+        "cooldown": 1.0,
+        "effect": {
+          "damage": 150,
+          "radius": 2,
+          "slow_pct": 30,
+          "slow_duration": 8
+        }
+      }
     },
     "orc_mage_shadow_shaman": {
       "name": "Теневой шаман орков",
       "cost": 5,
       "class": "mage",
       "race": "orc",
-      "hp": 500,
-      "damage": 200,
+      "hp": 760,
+      "damage": 238,
       "attack_speed": 1.0,
       "range": 5,
       "crit_chance": 25,
       "description": "Маг тени орков с проклятиями.",
       "passive": {
-        "name": "Тень орка",
-        "desc": "+25% урона за каждого союзного орка",
+        "name": "Тайна стихий",
+        "desc": "+15% за союзника своего класса",
         "type": "synergy_buff",
         "class": "mage",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 25}
+        "effect": {
+          "damage_bonus_pct_per_ally": 15
+        }
       },
-      "active": null
+      "active": {
+        "name": "Теневой град",
+        "type": "aoe_damage_slow",
+        "cooldown": 1.0,
+        "effect": {
+          "damage": 150,
+          "radius": 2,
+          "slow_pct": 35,
+          "slow_duration": 8
+        }
+      }
     },
     "elf_mage_star_mage": {
       "name": "Звёздный маг эльфов",
       "cost": 5,
       "class": "mage",
       "race": "elf",
-      "hp": 550,
-      "damage": 230,
-      "attack_speed": 0.8,
+      "hp": 760,
+      "damage": 214,
+      "attack_speed": 0.68,
       "range": 6,
       "crit_chance": 20,
       "description": "Маг звёзд эльфов с космической магией.",
       "passive": {
-        "name": "Звёздная сила",
-        "desc": "+30% урона за каждого союзного эльфа",
+        "name": "Тайна стихий",
+        "desc": "+15% за союзника своего класса",
         "type": "synergy_buff",
         "class": "mage",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 30}
+        "effect": {
+          "damage_bonus_pct_per_ally": 15
+        }
       },
-      "active": null
+      "active": {
+        "name": "Звёздные оковы",
+        "type": "stun",
+        "cooldown": 1.0,
+        "effect": {
+          "duration": 2.0,
+          "radius": 2
+        }
+      }
     },
     "orc_archer_war_bow": {
       "name": "Военный лук орков",
       "cost": 5,
       "class": "archer",
       "race": "orc",
-      "hp": 400,
-      "damage": 240,
+      "hp": 808,
+      "damage": 228,
       "attack_speed": 1.2,
       "range": 5,
       "crit_chance": 20,
       "description": "Орк-стрелок с военным луком.",
       "passive": {
-        "name": "Оркский глаз",
-        "desc": "+30% скорости атаки за каждого союзного орка",
+        "name": "Точный расчёт",
+        "desc": "+15% за союзника своего класса",
         "type": "synergy_buff",
         "class": "archer",
-        "count_by": "race",
-        "effect": {"speed_bonus_pct_per_ally": 30}
+        "effect": {
+          "damage_bonus_pct_per_ally": 15
+        }
       },
-      "active": null
+      "active": {
+        "name": "Боевой залп",
+        "type": "aoe_damage",
+        "cooldown": 0.8,
+        "effect": {
+          "damage": 170,
+          "radius": 2
+        }
+      }
     },
     "elf_archer_star_bow": {
       "name": "Звёздный лук эльфов",
       "cost": 5,
       "class": "archer",
       "race": "elf",
-      "hp": 380,
-      "damage": 220,
-      "attack_speed": 1.4,
+      "hp": 808,
+      "damage": 205,
+      "attack_speed": 1.19,
       "range": 6,
       "crit_chance": 30,
       "description": "Эльф-стрелок со звёздным луком.",
       "passive": {
-        "name": "Звёздный глаз",
-        "desc": "+30% скорости атаки за каждого союзного эльфа",
+        "name": "Точный расчёт",
+        "desc": "+15% за союзника своего класса",
         "type": "synergy_buff",
         "class": "archer",
-        "count_by": "race",
-        "effect": {"speed_bonus_pct_per_ally": 30}
+        "effect": {
+          "damage_bonus_pct_per_ally": 15
+        }
       },
-      "active": null
+      "active": {
+        "name": "Звёздный дождь",
+        "type": "aoe_damage_slow",
+        "cooldown": 1.0,
+        "effect": {
+          "damage": 170,
+          "radius": 2,
+          "slow_pct": 25,
+          "slow_duration": 8
+        }
+      }
     },
     "orc_healer_war_shaman": {
       "name": "Военный шаман орков",
       "cost": 5,
       "class": "healer",
       "race": "orc",
-      "hp": 550,
-      "damage": 90,
+      "hp": 950,
+      "damage": 114,
       "attack_speed": 0.9,
       "range": 3,
       "crit_chance": 15,
       "description": "Военный шаман орков, лечит в бою.",
       "passive": {
-        "name": "Воинский дух",
-        "desc": "+20% HP за каждого союзного орка",
+        "name": "Целительная рука",
+        "desc": "+13% за союзника своего класса",
         "type": "synergy_buff",
         "class": "healer",
-        "count_by": "race",
-        "effect": {"hp_bonus_pct_per_ally": 20}
+        "effect": {
+          "speed_bonus_pct_per_ally": 13
+        }
       },
       "active": {
-        "name": "Воинское исцеление",
-        "desc": "Лечит союзника с наименьшим HP на 180",
+        "name": "Исцеление предков",
         "type": "heal",
-        "cooldown": 30,
-        "effect": {"heal": 180}
+        "cooldown": 0.8,
+        "effect": {
+          "heal": 160,
+          "targets": "all_allies"
+        }
       }
     },
     "elf_healer_star_druid": {
@@ -1864,26 +2486,29 @@
       "cost": 5,
       "class": "healer",
       "race": "elf",
-      "hp": 500,
-      "damage": 80,
-      "attack_speed": 1.0,
+      "hp": 950,
+      "damage": 103,
+      "attack_speed": 0.85,
       "range": 3,
       "crit_chance": 15,
       "description": "Друид звёзд эльфов с магией природы.",
       "passive": {
-        "name": "Звёздная природа",
-        "desc": "+25% скорости атаки за каждого союзного эльфа",
+        "name": "Целительная рука",
+        "desc": "+13% за союзника своего класса",
         "type": "synergy_buff",
         "class": "healer",
-        "count_by": "race",
-        "effect": {"speed_bonus_pct_per_ally": 25}
+        "effect": {
+          "speed_bonus_pct_per_ally": 13
+        }
       },
       "active": {
         "name": "Звёздное исцеление",
-        "desc": "Лечит союзника с наименьшим HP на 170",
         "type": "heal",
-        "cooldown": 30,
-        "effect": {"heal": 170}
+        "cooldown": 0.8,
+        "effect": {
+          "heal": 150,
+          "targets": "all_allies"
+        }
       }
     },
     "undead_buffer_death_aura": {
@@ -1891,26 +2516,29 @@
       "cost": 5,
       "class": "buffer",
       "race": "undead",
-      "hp": 550,
-      "damage": 100,
+      "hp": 998,
+      "damage": 133,
       "attack_speed": 0.9,
       "range": 2,
       "crit_chance": 10,
       "description": "Баффер нежити с аурой смерти.",
       "passive": {
-        "name": "Аура смерти",
-        "desc": "+20% снижения урона за каждого союзного нежити",
+        "name": "Голос вождя",
+        "desc": "+14% за союзника своего класса",
         "type": "synergy_buff",
         "class": "buffer",
-        "count_by": "race",
-        "effect": {"damage_reduction_pct_per_ally": 20}
+        "effect": {
+          "speed_bonus_pct_per_ally": 14
+        }
       },
       "active": {
-        "name": "Аура нежити",
-        "desc": "+35% снижения урона всем союзникам на 20 тиков",
-        "type": "buff_allies",
-        "cooldown": 35,
-        "effect": {"damage_reduction_pct": 35, "duration": 20}
+        "name": "Аура смерти",
+        "type": "aura",
+        "cooldown": 1.0,
+        "effect": {
+          "bonus_damage_per_ally": 20,
+          "duration": 15
+        }
       }
     },
     "elf_warrior_blade_apprentice": {
@@ -1918,63 +2546,153 @@
       "cost": 1,
       "class": "warrior",
       "race": "elf",
-      "hp": 300,
-      "damage": 70,
-      "attack_speed": 1.2,
+      "hp": 400,
+      "damage": 37,
+      "attack_speed": 1.02,
       "range": 1,
       "crit_chance": 15,
       "description": "Молодой эльф-воин с клинком.",
       "passive": {
-        "name": "Легкий клинок",
-        "desc": "+10% урона за каждого союзного эльфа",
+        "name": "Братство стали",
+        "desc": "+11% за союзника своего класса",
         "type": "synergy_buff",
         "class": "warrior",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 10}
+        "effect": {
+          "hp_bonus_pct_per_ally": 11
+        }
       },
-      "active": null
+      "active": {
+        "name": "Ученический выпад",
+        "type": "buff_next_attack",
+        "cooldown": 0.8,
+        "effect": {
+          "bonus_damage": 45,
+          "radius": 1,
+          "duration": 2.5
+        }
+      }
     },
     "elf_mage_star_apprentice": {
       "name": "Эльф мага звёзд ученик",
       "cost": 2,
       "class": "mage",
       "race": "elf",
-      "hp": 340,
-      "damage": 100,
-      "attack_speed": 0.9,
+      "hp": 360,
+      "damage": 90,
+      "attack_speed": 0.77,
       "range": 4,
       "crit_chance": 15,
       "description": "Эльф-маг, изучающий звёздную магию.",
       "passive": {
-        "name": "Звёздный свет",
-        "desc": "+10% урона за каждого союзного эльфа",
+        "name": "Тайна стихий",
+        "desc": "+12% за союзника своего класса",
         "type": "synergy_buff",
         "class": "mage",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 10}
+        "effect": {
+          "damage_bonus_pct_per_ally": 12
+        }
       },
-      "active": null
+      "active": {
+        "name": "Звёздная искра",
+        "type": "single_target_critical",
+        "cooldown": 0.8,
+        "effect": {
+          "damage": 80
+        }
+      }
     },
     "human_archer_longbow": {
       "name": "Лучник с длинным луком",
       "cost": 4,
       "class": "archer",
       "race": "human",
-      "hp": 380,
-      "damage": 180,
+      "hp": 646,
+      "damage": 174,
       "attack_speed": 1.0,
       "range": 6,
       "crit_chance": 20,
       "description": "Лучник человека с большим луком.",
       "passive": {
-        "name": "Точный глаз",
-        "desc": "+15% урона за каждого союзного человека",
+        "name": "Точный расчёт",
+        "desc": "+14% за союзника своего класса",
         "type": "synergy_buff",
         "class": "archer",
-        "count_by": "race",
-        "effect": {"damage_bonus_pct_per_ally": 15}
+        "effect": {
+          "damage_bonus_pct_per_ally": 14
+        }
       },
-      "active": null
+      "active": {
+        "name": "Ядовитая стрела",
+        "type": "dot",
+        "cooldown": 0.8,
+        "effect": {
+          "damage_per_tick": 16,
+          "duration": 2.0,
+          "radius": 1,
+          "targets": "single"
+        }
+      }
+    },
+    "demon_warrior_imp_guard": {
+      "name": "Страж импов",
+      "cost": 1,
+      "class": "warrior",
+      "race": "demon",
+      "hp": 500,
+      "damage": 52,
+      "attack_speed": 1.05,
+      "range": 1,
+      "crit_chance": 5,
+      "description": "Ранний танк демонов.",
+      "passive": {
+        "name": "Братство стали",
+        "desc": "+11% за союзника своего класса",
+        "type": "synergy_buff",
+        "class": "warrior",
+        "effect": {
+          "hp_bonus_pct_per_ally": 11
+        }
+      },
+      "active": {
+        "name": "Адский дозор",
+        "type": "shield",
+        "cooldown": 0.8,
+        "effect": {
+          "shield": 100,
+          "duration": 2.0,
+          "targets": "self"
+        }
+      }
+    },
+    "demon_warrior_pit_lord": {
+      "name": "Повелитель ямы",
+      "cost": 3,
+      "class": "warrior",
+      "race": "demon",
+      "hp": 750,
+      "damage": 82,
+      "attack_speed": 0.9,
+      "range": 1,
+      "crit_chance": 5,
+      "description": "Мид-гейм танк демонов.",
+      "passive": {
+        "name": "Братство стали",
+        "desc": "+13% за союзника своего класса",
+        "type": "synergy_buff",
+        "class": "warrior",
+        "effect": {
+          "hp_bonus_pct_per_ally": 13
+        }
+      },
+      "active": {
+        "name": "Владыка ямы",
+        "type": "taunt",
+        "cooldown": 1.0,
+        "effect": {
+          "duration": 2.0,
+          "radius": 2
+        }
+      }
     }
   }
 }
