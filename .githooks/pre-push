@@ -1,0 +1,38 @@
+#!/bin/sh
+# pre-push: эмпирический гейт перед пушом — ловит краши UI, которые не видит pytest.
+# 1) сюита тестов; 2) headless-рендер драфта на 2 разрешениях; 3) стресс боевого
+# рендера (все расы/звёзды/предметы, 138 боёв). См. REVIEW_GUIDE.md.
+# Харнесы лежат в gitignored _scratch/ — если их нет, проверка пропускается с WARN.
+
+fail=0
+
+echo "[pre-push] 1/3 python -m pytest tests/ -q ..."
+PYTHONIOENCODING=utf-8 python -m pytest tests/ -q || fail=1
+
+echo ""
+echo "[pre-push] 2/3 headless-рендер драфта (1200x800 и 1920x1080) ..."
+if [ -f _scratch/render_draft_layout.py ]; then
+    SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy PYTHONIOENCODING=utf-8 PYTHONPATH=. \
+        python _scratch/render_draft_layout.py 1200 800 || fail=1
+    SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy PYTHONIOENCODING=utf-8 PYTHONPATH=. \
+        python _scratch/render_draft_layout.py 1920 1080 || fail=1
+else
+    echo "[pre-push] WARN: _scratch/render_draft_layout.py отсутствует — рендер пропущен."
+fi
+
+echo ""
+echo "[pre-push] 3/3 стресс боевого рендера (все расы/звёзды/предметы) ..."
+if [ -f _scratch/stress_battle_ui.py ]; then
+    SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy PYTHONIOENCODING=utf-8 PYTHONPATH=. \
+        python _scratch/stress_battle_ui.py || fail=1
+else
+    echo "[pre-push] WARN: _scratch/stress_battle_ui.py отсутствует — стресс пропущен."
+fi
+
+echo ""
+if [ "$fail" -ne 0 ]; then
+    echo "[pre-push] ПРОВЕРКИ УПАЛИ — пуш заблокирован. Почини и повтори."
+    exit 1
+fi
+echo "[pre-push] OK: тесты + рендеры + стресс зелёные."
+exit 0
